@@ -490,19 +490,27 @@ class Ledger:
             self.conn.commit()
             return int(cur.lastrowid)
 
+    @staticmethod
+    def _hydrate_recall(row) -> dict:
+        d = dict(row)
+        for k_json, k in (("tags_json", "tags"), ("records_json", "records")):
+            try:
+                d[k] = json.loads(d.get(k_json) or "[]")
+            except (json.JSONDecodeError, TypeError):
+                d[k] = []
+        return d
+
     def recent_recalls(self, limit: int = 50) -> list[dict]:
         rows = self.conn.execute(
             "SELECT * FROM recall_log ORDER BY timestamp DESC, id DESC LIMIT ?", (limit,)).fetchall()
-        out = []
-        for r in rows:
-            d = dict(r)
-            for k_json, k in (("tags_json", "tags"), ("records_json", "records")):
-                try:
-                    d[k] = json.loads(d.get(k_json) or "[]")
-                except (json.JSONDecodeError, TypeError):
-                    d[k] = []
-            out.append(d)
-        return out
+        return [self._hydrate_recall(r) for r in rows]
+
+    def recalls_for_session(self, session_id: str) -> list[dict]:
+        """pre_llm_call injections logged for one session, oldest first."""
+        rows = self.conn.execute(
+            "SELECT * FROM recall_log WHERE session_id=? ORDER BY timestamp ASC, id ASC",
+            (session_id,)).fetchall()
+        return [self._hydrate_recall(r) for r in rows]
 
     # -- tags ---------------------------------------------------------------
     def set_tags(self, target_key: str, tags: list[str]) -> list[str]:

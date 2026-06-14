@@ -263,6 +263,63 @@ def get_assembled_prompt(session_id: str) -> Optional[dict]:
         conn.close()
 
 
+def get_session_messages(session_id: str, max_content: int = 40000) -> List[dict]:
+    """Full conversation for a session (user/assistant/tool), in order.
+
+    Returns the complete message stream — not the truncated 500-char snippets
+    ``get_session_context`` uses — so the prompt viewer can show the whole
+    request. ``tool_calls`` is parsed into a compact ``[{name, arguments}]``
+    list. Robust to schema differences: selects ``*`` and reads keys defensively.
+    """
+    conn = _connect_ro()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT * FROM messages WHERE session_id=? ORDER BY id ASC",
+            (session_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+    out: List[dict] = []
+    for raw in rows:
+        r = dict(raw)
+        content = r.get("content") or ""
+        truncated = len(content) > max_content
+        calls = []
+        tc = r.get("tool_calls")
+        if tc:
+            try:
+                parsed = json.loads(tc) if isinstance(tc, str) else tc
+                for c in (parsed if isinstance(parsed, list) else []):
+                    fn = (c.get("function") or {}) if isinstance(c, dict) else {}
+                    args = fn.get("arguments")
+                    if isinstance(args, str) and len(args) > 2000:
+                        args = args[:2000] + "…"
+                    calls.append({"name": fn.get("name"), "arguments": args})
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                pass
+        reasoning = r.get("reasoning") or r.get("reasoning_content") or None
+        if isinstance(reasoning, str) and len(reasoning) > max_content:
+            reasoning = reasoning[:max_content] + "…"
+        out.append({
+            "role": r.get("role"),
+            "tool_name": r.get("tool_name"),
+            "tool_call_id": r.get("tool_call_id"),
+            "content": content[:max_content],
+            "truncated": truncated,
+            "tool_calls": calls,
+            "reasoning": reasoning,
+            "finish_reason": r.get("finish_reason"),
+            "token_count": r.get("token_count"),
+            "timestamp": r.get("timestamp"),
+        })
+    return out
+
+
 def get_session_context(session_id: str, limit: int = 12) -> dict:
     """Best-effort simplified conversation context for a session.
 

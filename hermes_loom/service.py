@@ -99,6 +99,9 @@ def prompt_detail(ledger: Ledger, session_id: str) -> Optional[dict]:
         "lines": sp.count("\n") + 1,
         "system_prompt": sp,
         "outline": _prompt_outline(sp),
+        # the rest of the request: the conversation + what pre_llm_call injected
+        "messages": hermes_state.get_session_messages(row["id"]),
+        "recalls": ledger.recalls_for_session(row["id"]),
     }
 
 

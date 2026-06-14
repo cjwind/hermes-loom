@@ -978,13 +978,73 @@ async function loadPromptDetail(sid) {
     ? el("div", { style: { display: "grid", gridTemplateColumns: "minmax(0,1fr) 230px", gap: "16px", alignItems: "start" } }, pre, outline)
     : pre;
 
-  D.promptDetail.replaceChildren(el("div", { style: { padding: "20px 22px 32px" } },
+  D.promptDetail.replaceChildren(el("div", { style: { padding: "20px 22px 40px" } },
     el("div", { style: { display: "flex", alignItems: "center", gap: "9px", marginBottom: "4px" } },
       icon("layers", { s: 17, color: "var(--accent)" }),
       el("div", { style: { fontSize: "16px", fontWeight: "700" } }, d.title || ("對話 " + (d.session_id || "").slice(0, 8))),
       el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, d.session_id)),
-    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "13px" } }, "這就是 Hermes 在這個對話裡，最終組合送進模型的系統 prompt（SOUL + 記憶 + skills + 工具框架 + 收尾）。"),
-    meta, body));
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "13px" } }, "送進模型的完整請求：① 系統 prompt（SOUL + 記憶 + skills + 工具框架）② pre_llm_call 注入的記憶 ③ 對話訊息。"),
+    meta,
+    promptSectionHead("layers", "① 系統 prompt", fmtInt(d.chars) + " 字 · " + fmtInt(d.lines) + " 行"),
+    body,
+    promptRecallsSection(d),
+    promptMessagesSection(d)));
+}
+function promptSectionHead(ic, title, sub) {
+  return el("div", { style: { display: "flex", alignItems: "center", gap: "8px", margin: "26px 0 12px", paddingBottom: "7px", borderBottom: "1px solid var(--border)" } },
+    icon(ic, { s: 14, color: "var(--accent)" }),
+    el("div", { style: { fontSize: "13.5px", fontWeight: "700" } }, title),
+    sub && el("span", { class: "loom-meta", style: { fontSize: "11px" } }, sub));
+}
+function promptRecallsSection(d) {
+  const recalls = d.recalls || [];
+  const head = promptSectionHead("flow", "② pre_llm_call 注入的記憶", recalls.length + " 次注入");
+  if (!recalls.length) {
+    return el("div", {}, head, el("div", { class: "loom-meta", style: { fontSize: "12px", lineHeight: "1.6" } },
+      "這個對話沒有 Loom 注入紀錄。當某回合的使用者訊息命中標籤時，Loom 會在 pre_llm_call 把相符的記憶接到 user message 後面，並記在這裡。"));
+  }
+  return el("div", {}, head,
+    ...recalls.map((rc) => el("div", { class: "loom-quote", style: { marginBottom: "10px" } },
+      el("div", { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", marginBottom: "6px" } },
+        el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), fmtTime(rc.timestamp)),
+        el("span", { class: "loom-tag " + (rc.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, rc.method),
+        ...(rc.tags || []).map((t) => el("span", { class: "loom-tag", style: { height: "18px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t)),
+        el("span", { class: "loom-meta" }, "注入 " + rc.count + " 筆")),
+      el("div", { class: "who", style: { marginBottom: "5px" } }, "命中的 USER 訊息 · " + (rc.message || "")),
+      ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0", display: "flex", gap: "6px" } },
+        el("span", { style: { color: "var(--accent)" } }, "＋"),
+        el("span", {}, r.value),
+        ...((r.tags || []).map((t) => el("span", { class: "loom-mono", style: { fontSize: "10px", color: "var(--text-4)" } }, "#" + t))))))));
+}
+const ROLE_STYLE = {
+  user: { bg: "var(--accent-soft)", fg: "var(--accent-ink)", label: "USER" },
+  assistant: { bg: "var(--surface-3)", fg: "var(--text)", label: "ASSISTANT" },
+  tool: { bg: "var(--surface-2)", fg: "var(--text-2)", label: "TOOL" },
+  system: { bg: "var(--human-soft)", fg: "var(--human)", label: "SYSTEM" },
+};
+function promptMessagesSection(d) {
+  const msgs = d.messages || [];
+  const head = promptSectionHead("link", "③ 對話訊息", msgs.length + " 則");
+  if (!msgs.length) return el("div", {}, head, el("div", { class: "loom-meta", style: { fontSize: "12px" } }, "（這個 session 沒有可顯示的訊息）"));
+  return el("div", {}, head,
+    ...msgs.map((m) => {
+      const rs = ROLE_STYLE[m.role] || { bg: "var(--surface-2)", fg: "var(--text-2)", label: (m.role || "?").toUpperCase() };
+      return el("div", { style: { border: "1px solid var(--border)", borderRadius: "9px", marginBottom: "9px", overflow: "hidden", background: "var(--surface)" } },
+        el("div", { style: { display: "flex", alignItems: "center", gap: "8px", padding: "7px 11px", background: rs.bg, flexWrap: "wrap" } },
+          el("span", { class: "loom-mono", style: { fontSize: "10px", fontWeight: "700", letterSpacing: ".04em", color: rs.fg } }, rs.label),
+          m.tool_name && el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-3)" } }, m.tool_name),
+          el("div", { style: { flex: "1" } }),
+          m.token_count != null && el("span", { class: "loom-meta", style: { fontSize: "10px" } }, m.token_count + " tok"),
+          m.timestamp && el("span", { class: "loom-meta", style: { fontSize: "10px" } }, fmtTime(m.timestamp))),
+        m.content && el("div", { style: { padding: "9px 12px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "340px", overflow: "auto", fontFamily: m.role === "tool" ? "IBM Plex Mono, ui-monospace, monospace" : "inherit" } },
+          m.content + (m.truncated ? "\n…（已截斷）" : "")),
+        m.reasoning && el("details", { style: { padding: "0 12px 9px" } },
+          el("summary", { class: "loom-meta", style: { cursor: "pointer", fontSize: "11px" } }, "reasoning"),
+          el("div", { style: { fontSize: "12px", color: "var(--text-2)", whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: "5px", maxHeight: "240px", overflow: "auto" } }, m.reasoning)),
+        ...(m.tool_calls || []).map((tc) => el("div", { style: { padding: "0 12px 9px" } },
+          el("span", { class: "loom-tag tag-auto", style: { height: "18px" } }, icon("spark", { s: 10 }), "tool_call " + (tc.name || "")),
+          tc.arguments && el("pre", { style: { margin: "5px 0 0", fontSize: "11.5px", color: "var(--text-2)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", fontFamily: "IBM Plex Mono, ui-monospace, monospace" } }, typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments, null, 2)))));
+    }));
 }
 const doCopyPrompt = guard(async function (text) {
   await navigator.clipboard.writeText(text || "");
