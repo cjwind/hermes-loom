@@ -110,6 +110,20 @@ CREATE TABLE IF NOT EXISTS loom_meta (
     value TEXT
 );
 
+-- Recall log: what the pre_llm_call hook injected each turn (for the UI debug
+-- view). Written by the gateway plugin; read by the serve UI (shared ledger).
+CREATE TABLE IF NOT EXISTS recall_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp REAL NOT NULL,
+    session_id TEXT,
+    message TEXT,
+    method TEXT,
+    tags_json TEXT,
+    count INTEGER,
+    records_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_recall_ts ON recall_log(timestamp DESC);
+
 -- HOLD: entries parked in Loom only (not in any Hermes file), so they are NOT
 -- compiled to MEMORY.md/USER.md. Recategorizing to 暫存 removes the entry from
 -- its file and stores it here; moving it back re-inserts it into a file.
@@ -419,6 +433,33 @@ class Ledger:
     def all_record_states(self) -> dict:
         rows = self.conn.execute("SELECT * FROM record_state").fetchall()
         return {(r["target_type"], r["target_key"]): dict(r) for r in rows}
+
+    # -- recall log ---------------------------------------------------------
+    def add_recall(self, *, message: str, method: str, tags: list, count: int,
+                   records: list, session_id: Optional[str] = None) -> int:
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO recall_log(timestamp,session_id,message,method,tags_json,count,records_json)"
+                " VALUES(?,?,?,?,?,?,?)",
+                (_now(), session_id, (message or "")[:500], method,
+                 json.dumps(tags, ensure_ascii=False), count,
+                 json.dumps(records, ensure_ascii=False)))
+            self.conn.commit()
+            return int(cur.lastrowid)
+
+    def recent_recalls(self, limit: int = 50) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM recall_log ORDER BY timestamp DESC, id DESC LIMIT ?", (limit,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            for k_json, k in (("tags_json", "tags"), ("records_json", "records")):
+                try:
+                    d[k] = json.loads(d.get(k_json) or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    d[k] = []
+            out.append(d)
+        return out
 
     # -- tags ---------------------------------------------------------------
     def set_tags(self, target_key: str, tags: list[str]) -> list[str]:

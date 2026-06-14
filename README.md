@@ -262,6 +262,8 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | POST | `/records/tags` | `{target_type, target_key, tags: [...]}` → set a record's tags |
 | GET | `/tags` | all tags in use |
 | POST | `/recall` | `{message}` → resolve relevant tags from a message + return matching records as context (used by the pre_llm_call hook) |
+| GET | `/recall-log` | recent context injections (what the hook injected each turn) |
+| GET | `/llm-status[?probe=1]` | whether the tag-resolution LLM is configured/working (no secrets) |
 | POST | `/records/pin` | `{target_type, target_key, pinned}` |
 | POST | `/overrides/memory/edit` | `{store_type, entry_key, new_text, reason?}` |
 | POST | `/overrides/memory/delete` | `{store_type, entry_key, reason?}` |
@@ -326,9 +328,15 @@ Tag resolution (in `tagger.py`):
   fails/times out. Always offline-safe.
 
 Because the hook runs in the gateway process, set the env vars where the gateway
-runs (e.g. the systemd unit's `Environment=`). The recall adds one short LLM
-round-trip per turn when configured; it no-ops instantly if no tags exist or none
-match. Try it: `POST /api/recall {"message": "..."}`.
+runs — putting `LOOM_LLM_*` in `~/.hermes/.env` works (Hermes loads it; so does
+Loom). The recall adds one short LLM round-trip per turn when configured; it
+no-ops instantly if no tags exist or none match.
+
+Every injection is recorded to `recall_log` (shared ledger), so the UI's **「注入
+紀錄」** button (and `GET /api/recall-log`) shows what was injected each turn —
+the message, the resolved tags, the method (llm/keyword), and which records. Debug
+the LLM wiring with `GET /api/llm-status?probe=1`. Try recall directly with
+`POST /api/recall {"message": "..."}`.
 
 ## Manual tuning safety
 

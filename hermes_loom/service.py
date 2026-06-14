@@ -399,9 +399,13 @@ def record_set_tags(ledger: Ledger, target_key: str, tags: list) -> dict:
     return {"tags": ledger.set_tags(target_key, tags)}
 
 
-def recall(ledger: Ledger, message: str, limit: int = 8) -> dict:
+def recall(ledger: Ledger, message: str, limit: int = 8,
+           log: bool = False, session_id: Optional[str] = None) -> dict:
     """Resolve relevant tags from a user message and return matching records'
-    content as injectable context. Used by the pre_llm_call hook."""
+    content as injectable context. Used by the pre_llm_call hook.
+
+    When ``log`` is set and an injection happens, the result is recorded in
+    recall_log so the UI can show what was injected last."""
     from . import tagger
     recs = build_records(ledger)["records"]
     all_tags = sorted({t for r in recs for t in r.get("tags", [])})
@@ -418,9 +422,19 @@ def recall(ledger: Ledger, message: str, limit: int = 8) -> dict:
         v = _active_value(r)
         lines.append("- " + (v if len(v) <= 300 else v[:300] + "…"))
     context = "\n".join(lines) if hits else ""
+    out_records = [{"id": r["id"], "value": _active_value(r), "tags": r["tags"]} for r in hits]
+    if log and hits:
+        try:
+            ledger.add_recall(message=message, method=method, tags=matched,
+                              count=len(hits), records=out_records, session_id=session_id)
+        except Exception:  # noqa: BLE001 - logging must never break a turn
+            pass
     return {"tags": matched, "method": method, "count": len(hits), "context": context,
-            "llm_configured": tagger.llm_configured(),
-            "records": [{"id": r["id"], "value": _active_value(r), "tags": r["tags"]} for r in hits]}
+            "llm_configured": tagger.llm_configured(), "records": out_records}
+
+
+def recall_log(ledger: Ledger, limit: int = 50) -> dict:
+    return {"recalls": ledger.recent_recalls(limit)}
 
 
 # -- inspector mutations -----------------------------------------------------

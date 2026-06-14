@@ -109,6 +109,7 @@ const S = {
 const D = {}; // persistent DOM refs
 
 const DIFF_MAX = 4000; // skip live char-diff above this (O(n·m) LCS would hang)
+const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString() : "—";
 const catLabel = (k) => (S.cats.find((c) => c.k === k) || {}).label || k;
 const activeValue = (r) => r.versions[r.active].value;
 const isTouched = (r) => r.versions.some((v) => v.kind === "human") || !!r.annotation || !!r.reclassified;
@@ -287,6 +288,8 @@ function buildHeader() {
   D.stats = stats;
   const themeBtn = el("button", { class: "loom-btn", onclick: toggleTheme });
   D.themeBtn = themeBtn; paintThemeBtn();
+  const recallBtn = el("button", { class: "loom-btn", onclick: viewRecallLog, title: "最近 pre_llm_call 注入了哪些記憶" },
+    icon("flow", { s: 14 }), "注入紀錄");
   const pill = el("span", { class: "loom-pill" }, el("span", { class: "loom-dot" }), "檢查狀態中…");
   D.pill = pill;
   return el("div", { class: "loom-top" },
@@ -295,7 +298,38 @@ function buildHeader() {
       el("div", { class: "loom-name", html: 'Hermes Loom <span class="sub">/ 檢視台</span>' })),
     pill,
     el("div", { class: "loom-top-spacer" }),
-    stats, themeBtn);
+    stats, recallBtn, themeBtn);
+}
+
+// Modal: recent context injections (from recall_log, written by the gateway hook)
+async function viewRecallLog() {
+  const overlay = el("div", { style: { position: "fixed", inset: "0", background: "rgba(0,0,0,.55)", zIndex: "200", display: "flex", alignItems: "center", justifyContent: "center" }, onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
+  const panel = el("div", { class: "loom-menu", style: { position: "static", width: "680px", maxWidth: "92vw", maxHeight: "82vh", overflow: "auto", padding: "16px 18px" } },
+    el("div", { class: "loom-meta" }, "載入中…"));
+  overlay.append(panel); document.body.append(overlay);
+  const head = (extra) => el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" } },
+    icon("flow", { s: 14 }), el("b", {}, "最近注入的記憶"),
+    extra, el("div", { style: { flex: "1" } }),
+    el("button", { class: "loom-iconbtn", onclick: () => overlay.remove() }, icon("x", { s: 13 })));
+  try {
+    const d = await api.get("/recall-log?limit=50");
+    const rows = (d.recalls || []).map((rc) =>
+      el("div", { class: "loom-quote", style: { marginBottom: "10px" } },
+        el("div", { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" } },
+          el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), fmtTime(rc.timestamp)),
+          el("span", { class: "loom-tag " + (rc.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, rc.method),
+          ...(rc.tags || []).map((t) => el("span", { class: "loom-tag", style: { height: "18px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t)),
+          el("span", { class: "loom-meta" }, "注入 " + rc.count + " 筆")),
+        el("div", { class: "who", style: { marginBottom: "4px" } }, "USER · " + (rc.message || "")),
+        ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0" } },
+          "• ", el("a", { class: "link", onclick: () => { overlay.remove(); if (S.records.find((x) => x.id === r.id)) { S.selId = r.id; renderRailList(); renderDetail(); } } }, r.value)))));
+    panel.replaceChildren(head(el("span", { class: "loom-meta" }, (d.recalls || []).length + " 筆")),
+      ...(rows.length ? rows : [el("div", { class: "loom-empty", style: { padding: "30px" } },
+        el("div", {}, "還沒有注入紀錄"),
+        el("div", { class: "loom-meta", style: { textAlign: "center", maxWidth: "420px" } }, "當對話經過 gateway 的 pre_llm_call hook、且使用者訊息命中某個標籤時，這裡會列出注入了哪些記憶。"))]));
+  } catch (e) {
+    panel.replaceChildren(head(null), el("div", { class: "banner err", style: { color: "var(--del)" } }, "讀取失敗：" + e.message));
+  }
 }
 
 // Reflect real auto-deposit status (plugin enabled + gateway running + recent hook).

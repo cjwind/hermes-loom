@@ -128,6 +128,41 @@ class TestRecall(LoomTestCase):
         self.assertEqual(res["context"], "")
 
 
+class TestRecallLog(LoomTestCase):
+    def _tagged(self):
+        self.write_memory("user", "allergic to shellfish")
+        led = self.ledger()
+        r = service.build_records(led)["records"][0]
+        service.record_set_tags(led, r["target_key"], ["food"])
+        return led
+
+    def test_recall_logs_when_log_true(self):
+        led = self._tagged()
+        service.recall(led, "food allergies?", log=True, session_id="s1")
+        log = service.recall_log(led)["recalls"]
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["method"], "keyword")
+        self.assertEqual(log[0]["tags"], ["food"])
+        self.assertEqual(log[0]["count"], 1)
+        self.assertEqual(log[0]["session_id"], "s1")
+        self.assertEqual(log[0]["records"][0]["value"], "allergic to shellfish")
+
+    def test_recall_does_not_log_by_default(self):
+        led = self._tagged()
+        service.recall(led, "food allergies?")            # log defaults False
+        self.assertEqual(service.recall_log(led)["recalls"], [])
+
+    def test_no_log_when_no_injection(self):
+        led = self._tagged()
+        service.recall(led, "tell me a joke", log=True)   # no tag match → no log
+        self.assertEqual(service.recall_log(led)["recalls"], [])
+
+    def test_plugin_hook_logs_injection(self):
+        led = self._tagged()
+        plugin.LoomPlugin().on_pre_llm_call(user_message="what food to avoid?", session_id="sx")
+        self.assertEqual(len(service.recall_log(led)["recalls"]), 1)
+
+
 class TestPluginPreLlmCall(LoomTestCase):
     def test_hook_injects_tagged_context(self):
         self.write_memory("user", "allergic to shellfish")

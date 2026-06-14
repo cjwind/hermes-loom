@@ -200,7 +200,13 @@ def h_tags(ledger, params, query, body):
 @route("POST", r"/api/recall")
 def h_recall(ledger, params, query, body):
     msg = body.get("message", "")
-    return 200, service.recall(ledger, msg, limit=int(body.get("limit", 8)))
+    return 200, service.recall(ledger, msg, limit=int(body.get("limit", 8)),
+                               log=bool(body.get("log", False)))
+
+
+@route("GET", r"/api/recall-log")
+def h_recall_log(ledger, params, query, body):
+    return 200, service.recall_log(ledger, limit=int(query.get("limit", ["50"])[0]))
 
 
 @route("GET", r"/api/llm-status")

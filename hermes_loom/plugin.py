@@ -127,16 +127,17 @@ class LoomPlugin:
         )
 
     # -- context injection before the model call -----------------------------
-    def on_pre_llm_call(self, *, user_message="", **_kw):
+    def on_pre_llm_call(self, *, user_message="", session_id="", **_kw):
         """Read the user's message, resolve relevant tags (AI/keyword), and
         inject matching tagged records as context. Returns {"context": ...} or None.
+        Logs each injection to recall_log so the UI can show what was injected.
         """
         msg = user_message if isinstance(user_message, str) else (
             user_message.get("content") if isinstance(user_message, dict) else "")
         if not msg:
             return None
         from . import service
-        res = service.recall(self.ledger, msg)
+        res = service.recall(self.ledger, msg, log=True, session_id=session_id or None)
         if res.get("context"):
             return {"context": res["context"]}
         return None
