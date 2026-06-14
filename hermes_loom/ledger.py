@@ -146,6 +146,10 @@ class Ledger:
         self._lock = threading.Lock()
         with self._lock:
             self.conn.execute("PRAGMA journal_mode=WAL")
+            # The plugin (in the gateway process) and the API server can open the
+            # same ledger.db concurrently; WAL + a busy timeout lets them coexist
+            # without transient "database is locked" errors.
+            self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.executescript(SCHEMA)
             self.conn.commit()
 
