@@ -17,13 +17,23 @@ dependencies = []
 fastapi = ["fastapi>=0.110", "uvicorn>=0.27"]
 test = []  # tests use stdlib unittest
 
+# Console script — the standalone service/CLI: `hermes-loom serve`, `sync`, etc.
 [project.scripts]
 hermes-loom = "hermes_loom.cli:main"
 
-# NOTE: Hermes 0.16 discovers a plugin from $HERMES_HOME/plugins/<dir>/ via the
-# repo-root `plugin.yaml` manifest + the root `__init__.py` `register(ctx)` — see
-# README "Install the plugin". This package metadata is only for the standalone
-# CLI/API/UI side of Loom.
+# Hermes plugin auto-discovery for a *pip-installed* Loom. Hermes scans this
+# entry-point group (importlib.metadata) and calls the module's register(ctx).
+# So `pip install hermes-loom` is enough — no copying into $HERMES_HOME/plugins/.
+# (Directory install via the repo-root plugin.yaml + __init__.py still works too.)
+[project.entry-points."hermes_agent.plugins"]
+hermes-loom = "hermes_loom.plugin"
+
+[project.urls]
+Homepage = "https://github.com/cwentsai/hermes-loom"
 
 [tool.setuptools]
 packages = ["hermes_loom"]
+
+# Ship the vanilla-JS UI (served by `hermes-loom serve`) inside the wheel.
+[tool.setuptools.package-data]
+hermes_loom = ["ui/*", "ui/**/*"]

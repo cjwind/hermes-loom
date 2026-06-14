@@ -58,10 +58,25 @@ test-ui: ## Run the JS component test (Inspector skill filter, needs node)
 .PHONY: compile
 compile: ## Byte-compile sources + syntax-check the UI
 	$(PY) -m py_compile hermes_loom/*.py tests/*.py && echo "compile OK"
-	node --check ui/app.js && echo "app.js syntax OK"
+	node --check hermes_loom/ui/app.js && echo "app.js syntax OK"
 
 .PHONY: check
 check: compile test test-ui ## compile + python tests + UI component test
+
+## --- packaging -------------------------------------------------------------
+
+.PHONY: build
+build: ## Build the wheel + sdist into dist/ (uv if present, else python -m build)
+	@command -v uv >/dev/null 2>&1 && uv build || $(PY) -m build
+	@echo "built dist/ — pip install dist/*.whl"
+
+.PHONY: install
+install: ## pip-install Loom into the current environment (service + Hermes plugin)
+	$(PY) -m pip install .
+
+.PHONY: install-plugin
+install-plugin: ## Copy the plugin into a Hermes install ($HERMES_HOME/plugins) — local or SSH host: make install-plugin HOST=rpi
+	./scripts/install-plugin.sh $(HOST)
 
 ## --- housekeeping ----------------------------------------------------------
 

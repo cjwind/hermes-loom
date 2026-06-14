@@ -83,7 +83,8 @@ MEMORY_ENTRY_SEPARATOR = "§"  # § on its own line
 
 
 def ui_dir() -> Path:
-    return Path(__file__).resolve().parent.parent / "ui"
+    """Static UI assets, bundled inside the package (so they ship in the wheel)."""
+    return Path(__file__).resolve().parent / "ui"
 
 
 def load_hermes_dotenv() -> int:

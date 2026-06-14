@@ -154,14 +154,52 @@ python3 -m hermes_loom.cli status
 
 ---
 
-## Install the plugin (live observation)
+## Install via pip (distributable)
+
+For anyone else to use Loom without cloning the repo, install the package. It is
+still **zero-dependency** (stdlib only), and the wheel bundles the UI:
+
+```bash
+pip install hermes-loom            # from a built wheel / PyPI
+# or, from a checkout:
+pip install .                      # (make install)
+make build                         # build dist/*.whl + sdist to hand out
+```
+
+`pip install` gives you **both** halves at once:
+
+1. **The service + UI** — a `hermes-loom` console script:
+   ```bash
+   hermes-loom sync                 # backfill the ledger
+   hermes-loom serve --port 8765    # -> http://127.0.0.1:8765/  (UI bundled)
+   ```
+2. **The Hermes plugin** — auto-discovered. Loom registers an entry point in the
+   `hermes_agent.plugins` group, so Hermes finds it via `importlib.metadata` with
+   no file copying. Just install it into **the same environment Hermes runs in**,
+   enable, and restart:
+   ```bash
+   hermes plugins list              # hermes-loom appears (source: entrypoint)
+   hermes plugins enable hermes-loom
+   hermes gateway restart
+   ```
+
+> The plugin runs **inside the Hermes gateway process**, so it must be installed
+> into Hermes' own Python environment (e.g. its venv / uv environment), not a
+> separate one. The standalone `hermes-loom serve` can run anywhere that can read
+> `~/.hermes` and the Loom ledger.
+
+---
+
+## Install the plugin (live observation, without pip)
 
 The plugin is **optional** — `ingest`/`reconcile` already give you visibility.
 Install it to capture growth the moment it happens.
 
-Hermes 0.16 discovers a plugin from `$HERMES_HOME/plugins/<dir>/` via a
-`plugin.yaml` manifest + a sibling `__init__.py` exposing `register(ctx)`. This
-repo ships both at its root, so the repo *is* the plugin directory.
+Besides the pip/entry-point path above, Hermes 0.16 also discovers a plugin from
+`$HERMES_HOME/plugins/<dir>/` via a `plugin.yaml` manifest + a sibling
+`__init__.py` exposing `register(ctx)`. This repo ships both at its root, so the
+repo *is* the plugin directory — handy for installing a working checkout onto a
+remote without building a wheel.
 
 `hermes plugins install` only accepts a **Git URL / owner-repo**, so for a local
 checkout use the bundled installer (copies the runtime files into the plugins

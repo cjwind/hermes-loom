@@ -66,7 +66,7 @@ function allText(node, acc = []) {
   return acc;
 }
 
-const code = fs.readFileSync(path.join(__dirname, "..", "ui", "app.js"), "utf8");
+const code = fs.readFileSync(path.join(__dirname, "..", "hermes_loom", "ui", "app.js"), "utf8");
 const checks = [];
 function assert(cond, msg) { checks.push([cond, msg]); }
 
