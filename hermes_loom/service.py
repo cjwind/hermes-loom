@@ -226,7 +226,8 @@ def _state(states: dict, target_type: str, key: str) -> dict:
 
 
 def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
-                  states: dict, *, detail: str = "", skill_content: Optional[str] = None) -> dict:
+                  states: dict, *, detail: str = "", skill_content: Optional[str] = None,
+                  fallback_ts: float = 0.0) -> dict:
     st = _state(states, target_type, key)
     overrides_list = ledger.overrides_for_target(target_type, key)
     edit_ovr = next((o for o in overrides_list
@@ -248,6 +249,15 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
                      "when": _rel_time(origin["timestamp"]) if origin else "", "value": value}]
         active = 0
 
+    # Sortable timestamp = most recent activity: a manual edit if present, else
+    # the originating event, else a caller-supplied fallback (e.g. skill mtime).
+    if edit_ovr:
+        ts = edit_ovr["applied_at"]
+    elif origin:
+        ts = origin["timestamp"]
+    else:
+        ts = fallback_ts
+
     hint = origin["source_hint"] if origin else None
     cat = st.get("cat") or _CAT_DEFAULT.get(target_type, "memory")
     if cat not in _CAT_LABELS:   # coerce any legacy category (e.g. fact/struct)
@@ -267,6 +277,7 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
         "raw": _raw_from_event(origin) or {"who": "Hermes", "parts": ["（找不到對應的原始對話片段）"]},
         # Note: the design dropped the EXTRACT/CLASSIFY pipeline stages, so we no
         # longer emit `extract`/`classify`. The category is carried by `cat`.
+        "ts": ts,
         "active": active,
         "versions": versions,
         "pinned": bool(st.get("pinned")),
@@ -313,8 +324,12 @@ def build_records(ledger: Ledger) -> dict:
             skill_summary.get(s.get("origin_type", "community"), 0) + 1
         val = s.get("description") or s["name"]
         rec = _build_record(ledger, "skill", s["name"], val, states,
-                            detail=f"技能 · {s.get('category') or ''}".strip(" ·"))
+                            detail=f"技能 · {s.get('category') or ''}".strip(" ·"),
+                            fallback_ts=s.get("mtime", 0.0))
         records.append(_tag_skill_origin(rec, s))
+
+    # Newest first. The rail claims "依時間", so order really is by ts desc.
+    records.sort(key=lambda r: r.get("ts") or 0, reverse=True)
 
     return {"count": len(records), "records": records,
             "cats": [{"k": k, "label": v} for k, v in _CAT_LABELS.items()],

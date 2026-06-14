@@ -39,6 +39,33 @@ class TestRecords(LoomTestCase):
         self.assertEqual(r["versions"][0]["kind"], "auto")
         self.assertEqual(r["conf"], 3)                   # plugin_hook origin
 
+    def test_records_sorted_by_time_desc(self):
+        self.write_memory("user", "older entry\n§\nnewer entry")
+        led = self.ledger()
+        obs = Observer(led)
+        obs.on_memory_write("add", "user", "older entry", timestamp=1000.0, capture_window=False)
+        obs.on_memory_write("add", "user", "newer entry", timestamp=2000.0, capture_window=False)
+        out = service.build_records(led)
+        users = [r for r in out["records"] if r["target_type"] == "user"]
+        self.assertEqual(users[0]["versions"][users[0]["active"]]["value"], "newer entry")
+        self.assertEqual(users[1]["versions"][users[1]["active"]]["value"], "older entry")
+        # overall list is monotonically non-increasing by ts
+        ts = [r.get("ts") or 0 for r in out["records"]]
+        self.assertEqual(ts, sorted(ts, reverse=True))
+
+    def test_edited_record_floats_up(self):
+        self.write_memory("user", "a\n§\nb")
+        led = self.ledger()
+        obs = Observer(led)
+        obs.on_memory_write("add", "user", "a", timestamp=5000.0, capture_window=False)
+        obs.on_memory_write("add", "user", "b", timestamp=9000.0, capture_window=False)
+        # edit the older one ("a") → its ts becomes "now" (huge) → floats to top
+        out = service.build_records(led)
+        a = next(r for r in out["records"] if r["versions"][r["active"]]["value"] == "a")
+        service.record_edit(led, a["target_type"], a["target_key"], "a-edited")
+        out2 = service.build_records(led)
+        self.assertEqual(out2["records"][0]["versions"][out2["records"][0]["active"]]["value"], "a-edited")
+
     def test_record_detail_roundtrip(self):
         led = self._seed()
         rid = service.build_records(led)["records"][0]["id"]
