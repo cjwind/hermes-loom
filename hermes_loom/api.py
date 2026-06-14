@@ -13,6 +13,10 @@ Endpoints (see README for full list):
   POST /api/soul/compile              (write DB SOUL content out to ~/.hermes/SOUL.md)
   GET  /api/prompts                   (recent conversations with an assembled prompt)
   GET  /api/prompts/{session_id}      (the final composed system prompt + outline)
+  GET  /api/packs                     (Loom middle-layer memory packs)
+  POST /api/packs/save                (create/update a pack: title + tags + content)
+  POST /api/packs/delete              (delete a pack)
+  POST /api/recall                    (test which packs a message would inject)
   GET  /api/skills
   GET  /api/skills/{name}
   GET  /api/sessions/{id}/context
@@ -185,21 +189,34 @@ def h_record_annotate(ledger, params, query, body):
         return 400, {"ok": False, "error": str(e)}
 
 
-@route("POST", r"/api/records/tags")
-def h_record_tags(ledger, params, query, body):
+# ---- packs (Loom-only middle memory layer) ------------------------------
+
+@route("GET", r"/api/packs")
+def h_packs(ledger, params, query, body):
+    return 200, service.list_packs(ledger)
+
+
+@route("POST", r"/api/packs/save")
+def h_pack_save(ledger, params, query, body):
     try:
-        _tt, tk = _record_target(body)
-        tags = body.get("tags")
-        if not isinstance(tags, list):
-            raise KeyError("tags (list) required")
-        return 200, {"ok": True, **service.record_set_tags(ledger, tk, tags)}
-    except KeyError as e:
+        res = service.save_pack(
+            ledger, pack_id=body.get("id"), title=body.get("title", ""),
+            tags=body.get("tags", []), content=body.get("content", ""),
+            enabled=bool(body.get("enabled", True)),
+        )
+        return 200, {"ok": True, **res}
+    except ValueError as e:
         return 400, {"ok": False, "error": str(e)}
 
 
-@route("GET", r"/api/tags")
-def h_tags(ledger, params, query, body):
-    return 200, {"tags": ledger.all_tags()}
+@route("POST", r"/api/packs/delete")
+def h_pack_delete(ledger, params, query, body):
+    try:
+        if "id" not in body:
+            raise ValueError("id required")
+        return 200, {"ok": True, **service.delete_pack(ledger, body["id"])}
+    except ValueError as e:
+        return 400, {"ok": False, "error": str(e)}
 
 
 @route("POST", r"/api/recall")

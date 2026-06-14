@@ -136,15 +136,20 @@ CREATE TABLE IF NOT EXISTS held_entries (
     metadata_json TEXT
 );
 
--- Tags: each record may have many tags. Keyed by target_key alone (content hash
--- for memory/user/hold; skill name for skills) so tags follow the content across
--- files. Used by the pre_llm_call recall hook.
-CREATE TABLE IF NOT EXISTS record_tags (
-    target_key TEXT NOT NULL,
-    tag TEXT NOT NULL,
-    PRIMARY KEY (target_key, tag)
+-- Packs: a Loom-only middle memory layer. Each pack is a free-text note with a
+-- title and tags. The pre_llm_call recall hook resolves the user message against
+-- pack titles+tags and injects the matching packs' content as context. Packs are
+-- independent of Hermes memory/skills — authored and stored only in Loom.
+CREATE TABLE IF NOT EXISTS packs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    tags_json TEXT,                          -- JSON array of tag strings
+    content TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,       -- disabled packs are never injected
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_tags_tag ON record_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_packs_enabled ON packs(enabled);
 
 -- SOUL.md versions: Loom owns an editable copy of the agent identity file.
 -- Append-only history; the newest row is the current edited content. Unlike
@@ -512,33 +517,67 @@ class Ledger:
             (session_id,)).fetchall()
         return [self._hydrate_recall(r) for r in rows]
 
-    # -- tags ---------------------------------------------------------------
-    def set_tags(self, target_key: str, tags: list[str]) -> list[str]:
+    # -- packs (Loom-only middle memory layer) ------------------------------
+    @staticmethod
+    def _clean_tags(tags) -> list[str]:
         clean, seen = [], set()
-        for t in tags or []:
+        for t in (tags or []):
             t = str(t).strip()
             if t and t.lower() not in seen:
                 seen.add(t.lower()); clean.append(t)
-        with self._lock:
-            self.conn.execute("DELETE FROM record_tags WHERE target_key=?", (target_key,))
-            self.conn.executemany("INSERT INTO record_tags(target_key,tag) VALUES(?,?)",
-                                  [(target_key, t) for t in clean])
-            self.conn.commit()
         return clean
 
-    def get_tags(self, target_key: str) -> list[str]:
-        return [r["tag"] for r in self.conn.execute(
-            "SELECT tag FROM record_tags WHERE target_key=? ORDER BY tag", (target_key,)).fetchall()]
+    @staticmethod
+    def _hydrate_pack(row) -> dict:
+        d = dict(row)
+        try:
+            d["tags"] = json.loads(d.get("tags_json") or "[]")
+        except (json.JSONDecodeError, TypeError):
+            d["tags"] = []
+        d.pop("tags_json", None)
+        d["enabled"] = bool(d.get("enabled", 1))
+        return d
 
-    def tags_map(self) -> dict:
-        out: dict = {}
-        for r in self.conn.execute("SELECT target_key, tag FROM record_tags").fetchall():
-            out.setdefault(r["target_key"], []).append(r["tag"])
-        return out
+    def create_pack(self, title: str, tags, content: str, enabled: bool = True) -> int:
+        ts = _now()
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO packs(title,tags_json,content,enabled,created_at,updated_at)"
+                " VALUES(?,?,?,?,?,?)",
+                (title, json.dumps(self._clean_tags(tags), ensure_ascii=False),
+                 content, 1 if enabled else 0, ts, ts),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
 
-    def all_tags(self) -> list[str]:
-        return [r["tag"] for r in self.conn.execute(
-            "SELECT DISTINCT tag FROM record_tags ORDER BY tag").fetchall()]
+    def update_pack(self, pack_id: int, *, title: str, tags, content: str,
+                    enabled: bool = True) -> bool:
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE packs SET title=?, tags_json=?, content=?, enabled=?, updated_at=? "
+                "WHERE id=?",
+                (title, json.dumps(self._clean_tags(tags), ensure_ascii=False),
+                 content, 1 if enabled else 0, _now(), pack_id),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def delete_pack(self, pack_id: int) -> bool:
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM packs WHERE id=?", (pack_id,))
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def get_pack(self, pack_id: int) -> Optional[dict]:
+        row = self.conn.execute("SELECT * FROM packs WHERE id=?", (pack_id,)).fetchone()
+        return self._hydrate_pack(row) if row else None
+
+    def list_packs(self, enabled_only: bool = False) -> list[dict]:
+        sql = "SELECT * FROM packs"
+        if enabled_only:
+            sql += " WHERE enabled=1"
+        sql += " ORDER BY updated_at DESC, id DESC"
+        return [self._hydrate_pack(r) for r in self.conn.execute(sql).fetchall()]
 
     # -- held (HOLD) entries — Loom-only, never compiled --------------------
     def add_held(self, key: str, text: str, from_store: Optional[str] = None,

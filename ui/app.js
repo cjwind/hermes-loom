@@ -35,6 +35,7 @@ const ICONS = {
   flow: '<g><circle cx="3.5" cy="8" r="1.8"/><circle cx="12.5" cy="3.5" r="1.8"/><circle cx="12.5" cy="12.5" r="1.8"/><path d="M5.3 8h2M9 4.5l1.7-.6M9 11.5l1.7.6M7.5 8c2 0 1.5-3.5 3.3-3.9M7.5 8c2 0 1.5 3.5 3.3 3.9"/></g>',
   clock: '<g><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5"/></g>',
   layers: '<g><path d="M8 2l6 3-6 3-6-3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>',
+  pack: '<g><path d="M2.5 5l5.5-3 5.5 3v6l-5.5 3-5.5-3V5z"/><path d="M2.5 5L8 8l5.5-3M8 8v6"/></g>',
   tag: '<g><path d="M2.5 2.5h5L13 8l-5 5-5.5-5.5v-5z"/><circle cx="5" cy="5" r="1" fill="currentColor" stroke="none"/></g>',
   plus: '<path d="M8 3v10M3 8h10"/>',
   check: '<path d="M3 8.5l3.2 3L13 4.5"/>',
@@ -108,6 +109,7 @@ const S = {
   toasts: [], mode: null, draft: "", menuOpen: false,
   view: "inspector", soul: null,
   promptList: [], promptSel: null,
+  packs: [], packSel: null,
 };
 const D = {}; // persistent DOM refs
 
@@ -142,7 +144,7 @@ function visibleRecords() {
     .filter((r) => r.target_type !== "skill" || r.is_agent_created)
     .filter((r) => S.filter === "all" || r.cat === S.filter)
     .filter((r) => !S.humanOnly || isTouched(r))
-    .filter((r) => !q || (activeValue(r) + r.detail + r.origin + " " + (r.tags || []).join(" ")).toLowerCase().includes(q));
+    .filter((r) => !q || (activeValue(r) + r.detail + r.origin).toLowerCase().includes(q));
 }
 
 // ───────────────────────── toasts ─────────────────────────
@@ -309,6 +311,7 @@ function buildHeader() {
 const NAV_VIEWS = [
   { k: "inspector", label: "檢視台", icon: "flow" },
   { k: "soul", label: "SOUL", icon: "spark" },
+  { k: "packs", label: "記憶層", icon: "pack" },
   { k: "prompts", label: "Prompt", icon: "layers" },
 ];
 function buildNav() {
@@ -337,9 +340,11 @@ function setView(v) {
   S.view = v;
   if (D.inspectorBody) D.inspectorBody.style.display = v === "inspector" ? "flex" : "none";
   if (D.soulBody) D.soulBody.style.display = v === "soul" ? "block" : "none";
+  if (D.packsBody) D.packsBody.style.display = v === "packs" ? "flex" : "none";
   if (D.promptsBody) D.promptsBody.style.display = v === "prompts" ? "flex" : "none";
   paintNav();
   if (v === "soul") renderSoul();
+  if (v === "packs") renderPacks();
   if (v === "prompts") renderPrompts();
 }
 
@@ -364,7 +369,8 @@ async function viewRecallLog() {
           el("span", { class: "loom-meta" }, "注入 " + rc.count + " 筆")),
         el("div", { class: "who", style: { marginBottom: "4px" } }, "USER · " + (rc.message || "")),
         ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0" } },
-          "• ", el("a", { class: "link", onclick: () => { overlay.remove(); if (S.records.find((x) => x.id === r.id)) { S.selId = r.id; renderRailList(); renderDetail(); } } }, r.value)))));
+          el("span", { style: { color: "var(--accent)" } }, "＋ "),
+          r.title && el("b", {}, "【" + r.title + "】"), r.value || ""))));
     panel.replaceChildren(head(el("span", { class: "loom-meta" }, (d.recalls || []).length + " 筆")),
       ...(rows.length ? rows : [el("div", { class: "loom-empty", style: { padding: "30px" } },
         el("div", {}, "還沒有注入紀錄"),
@@ -464,26 +470,7 @@ function listRow(r) {
       el("span", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" } },
         el("span", { class: "loom-meta", style: { fontSize: "10.5px" } }, r.when || "—"),
         r.pinned && icon("pin", { s: 10, color: "var(--accent)" }),
-        isTouched(r) && el("span", { title: "人工調整過", style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } })),
-      listTags(r)));
-}
-// Compact tag chips for a rail list row. Shows up to 3 tags + an overflow
-// count; renders nothing when the record has no tags. Clicking a chip filters
-// the list to that tag (same mechanism as the search box).
-const LIST_TAGS_MAX = 3;
-function listTags(r) {
-  const tags = r.tags || [];
-  if (!tags.length) return null;
-  const shown = tags.slice(0, LIST_TAGS_MAX);
-  const extra = tags.length - shown.length;
-  return el("span", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px", marginTop: "4px" } },
-    icon("tag", { s: 9, color: "var(--text-4)" }),
-    ...shown.map((t) => el("span", {
-      class: "loom-tag", title: "篩選：" + t,
-      style: { height: "15px", padding: "0 5px", gap: "0", fontSize: "9.5px", fontWeight: "500", background: "var(--surface-3)", color: "var(--text-2)", cursor: "pointer" },
-      onclick: (e) => { e.stopPropagation(); S.query = t; D.search && (D.search.value = t); renderRailList(); },
-    }, t)),
-    extra > 0 && el("span", { class: "loom-meta", title: tags.slice(LIST_TAGS_MAX).join("、"), style: { fontSize: "9.5px", color: "var(--text-4)" } }, "+" + extra));
+        isTouched(r) && el("span", { title: "人工調整過", style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } }))));
 }
 function renderRailList() {
   const vis = visibleRecords();
@@ -541,9 +528,7 @@ function renderDetail() {
     S.mode === "edit" ? editor(r, val) : el("div", { style: { fontSize: "18px", fontWeight: "600", letterSpacing: "-0.3px", lineHeight: "1.35", textWrap: "pretty" } }, val),
     S.mode !== "edit" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "4px" } }, r.detail),
     S.mode === null && actionRow(r),
-    S.mode === null && tagsRow(r),
     S.mode === "recat" && recatComposer(r),
-    S.mode === "tags" && tagsComposer(r),
     S.mode === "anno" && annoComposer(r)));
 
   const body = el("div", { style: { flex: "1", overflow: "auto", padding: "20px 26px" } });
@@ -581,7 +566,6 @@ function actionRow(r) {
   return el("div", { style: { display: "flex", gap: "8px", marginTop: "14px", position: "relative" } },
     el("button", { class: "loom-btn", onclick: () => enterEdit(r) }, icon("pencil", { s: 13 }), isSkill ? "編輯內容" : "編輯"),
     !isSkill && el("button", { class: "loom-btn", onclick: () => { S.mode = "recat"; renderDetail(); } }, icon("flow", { s: 13 }), "改分類"),
-    el("button", { class: "loom-btn", onclick: () => { S.mode = "tags"; renderDetail(); } }, icon("tag", { s: 13 }), "標籤"),
     el("button", { class: "loom-btn", onclick: () => enterAnno(r) }, icon("note", { s: 13 }), r.annotation ? "編輯註解" : "加註解"),
     el("div", { style: { flex: "1" } }),
     el("button", { class: "loom-btn", onclick: () => doPin(r) }, icon("pin", { s: 13 }), r.pinned ? "取消釘選" : "釘選"),
@@ -669,36 +653,6 @@ function enterAnno(r) {
   renderDetail();
   if (D.annoTa) D.annoTa.focus();
 }
-function tagsRow(r) {
-  const tags = r.tags || [];
-  return el("div", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "10px", flexWrap: "wrap" } },
-    el("span", { class: "loom-mono", style: { fontSize: "10px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".05em" } }, "標籤"),
-    ...(tags.length
-      ? tags.map((t) => el("span", { class: "loom-tag", style: { height: "19px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t))
-      : [el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "（無 · 用於對話時自動帶入相關記憶）")]));
-}
-
-const doSetTags = guard(async function (r, tags) {
-  S.mode = null;
-  await api.post("/records/tags", { target_type: r.target_type, target_key: r.target_key, tags });
-  await loadRecords((x) => x.id === r.id || x.target_key === r.target_key);
-  pushToast({ tone: "human", text: tags.length ? "已更新標籤" : "已清除標籤" });
-});
-
-function tagsComposer(r) {
-  const input = el("input", { class: "loom-input", placeholder: "用逗號分隔，例如：飲食, 健康, 旅行",
-    value: (r.tags || []).join(", ") });
-  const parse = () => input.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
-  setTimeout(() => input.focus(), 0);
-  return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
-    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html:
-      "設定標籤（可多個）。對話時 Loom 會用 AI 判斷你的訊息跟哪些標籤相關，再把<b style='color:var(--text)'>有該標籤的資料</b>注入給模型。" }),
-    input,
-    el("div", { style: { display: "flex", gap: "8px", marginTop: "10px" } },
-      el("button", { class: "loom-btn primary", onclick: () => doSetTags(r, parse()) }, icon("check", { s: 13 }), "儲存標籤"),
-      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
-}
-
 function recatComposer(r) {
   const movable = S.cats.filter((c) => c.k === "memory" || c.k === "pref" || c.k === "hold");
   return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
@@ -1011,8 +965,9 @@ function promptRecallsSection(d) {
         ...(rc.tags || []).map((t) => el("span", { class: "loom-tag", style: { height: "18px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t)),
         el("span", { class: "loom-meta" }, "注入 " + rc.count + " 筆")),
       el("div", { class: "who", style: { marginBottom: "5px" } }, "命中的 USER 訊息 · " + (rc.message || "")),
-      ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0", display: "flex", gap: "6px" } },
+      ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0", display: "flex", gap: "6px", flexWrap: "wrap" } },
         el("span", { style: { color: "var(--accent)" } }, "＋"),
+        r.title && el("b", {}, "【" + r.title + "】"),
         el("span", {}, r.value),
         ...((r.tags || []).map((t) => el("span", { class: "loom-mono", style: { fontSize: "10px", color: "var(--text-4)" } }, "#" + t))))))));
 }
@@ -1051,6 +1006,132 @@ const doCopyPrompt = guard(async function (text) {
   pushToast({ tone: "human", text: "已複製組合後的 prompt" });
 });
 
+// ───────────────────────── packs (middle memory layer) ─────────────────────────
+const parseTagsInput = (s) => (s || "").split(/[,，]/).map((x) => x.trim()).filter(Boolean);
+function packTagChips(tags, opts) {
+  return (tags || []).map((t) => el("span", { class: "loom-tag", style: Object.assign({ height: "17px", padding: "0 6px", fontSize: "10px", background: "var(--surface-3)", color: "var(--text-2)" }, opts || {}) }, icon("tag", { s: 9 }), t));
+}
+async function renderPacks() {
+  if (!D.packList) {
+    D.packList = el("div", { style: { width: "276px", flex: "0 0 auto", borderRight: "1px solid var(--border)", overflow: "auto", background: "var(--surface)" } });
+    D.packDetail = el("div", { style: { flex: "1", overflow: "auto", background: "var(--bg)", minWidth: "0" } });
+    D.packsBody.replaceChildren(D.packList, D.packDetail);
+  }
+  D.packList.replaceChildren(el("div", { class: "loom-meta", style: { padding: "16px" } }, "載入 packs…"));
+  let data;
+  try { data = await api.get("/packs"); }
+  catch (e) { D.packList.replaceChildren(el("div", { class: "banner err", style: { margin: "14px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  S.packs = data.packs || [];
+  if (S.packSel !== "new" && !S.packs.find((p) => p.id === S.packSel)) {
+    S.packSel = S.packs.length ? S.packs[0].id : "new";
+  }
+  paintPackList();
+  renderPackDetail();
+}
+function paintPackList() {
+  const addOn = S.packSel === "new";
+  const add = el("button", {
+    class: "loom-btn" + (addOn ? " primary" : ""), style: { margin: "11px 12px", width: "calc(100% - 24px)", justifyContent: "center" },
+    onclick: () => { S.packSel = "new"; paintPackList(); renderPackDetail(); },
+  }, icon("plus", { s: 14 }), "新增 pack");
+  const rows = S.packs.map((p) => {
+    const on = p.id === S.packSel;
+    return el("button", {
+      style: { display: "block", width: "100%", textAlign: "left", border: "none", font: "inherit", cursor: "pointer", padding: "9px 12px", background: on ? "var(--surface-3)" : "transparent", boxShadow: on ? "inset 2px 0 0 var(--accent)" : "none", opacity: p.enabled ? "1" : ".5" },
+      onclick: () => { S.packSel = p.id; paintPackList(); renderPackDetail(); },
+    },
+      el("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
+        el("span", { style: { width: "6px", height: "6px", borderRadius: "50%", flex: "0 0 auto", background: p.enabled ? "var(--cat-fact, var(--accent))" : "var(--text-4)" }, title: p.enabled ? "啟用中" : "已停用" }),
+        el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, p.title || "（未命名）")),
+      (p.tags || []).length ? el("div", { style: { display: "flex", gap: "4px", flexWrap: "wrap", margin: "4px 0 0 12px" } }, ...packTagChips(p.tags.slice(0, 4), { height: "15px", fontSize: "9px" })) : null,
+      el("div", { class: "loom-meta", style: { fontSize: "10.5px", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, (p.content || "").slice(0, 50)));
+  });
+  D.packList.replaceChildren(add,
+    el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "2px 12px 6px" } }, S.packs.length + " 個 pack"),
+    ...rows,
+    !S.packs.length ? el("div", { class: "loom-meta", style: { padding: "14px", fontSize: "11.5px", lineHeight: "1.6" } }, "還沒有 pack。新增一個：給它標題與標籤，對話時 Loom 會依你的訊息選相關的 pack 注入。") : null);
+}
+function renderPackDetail() {
+  const host = D.packDetail;
+  const isNew = S.packSel === "new";
+  const p = isNew ? { id: null, title: "", tags: [], content: "", enabled: true }
+                  : (S.packs.find((x) => x.id === S.packSel) || null);
+  if (!p) { host.replaceChildren(el("div", { class: "loom-empty", style: { padding: "44px" } }, icon("pack", { s: 26, color: "var(--text-3)" }), el("div", { style: { fontSize: "13px" } }, "從左側選一個 pack，或新增一個"))); return; }
+
+  const title = el("input", { class: "loom-input", placeholder: "標題，例如：風浪板", value: p.title });
+  const tags = el("input", { class: "loom-input", placeholder: "標籤，用逗號分隔，例如：運動, 戶外, 心情", value: (p.tags || []).join(", ") });
+  const content = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "34vh", resize: "vertical", padding: "12px 14px", lineHeight: "1.6", fontSize: "13px", boxSizing: "border-box" }, placeholder: "純文字內容。被選中時這段會原樣注入給模型。" });
+  content.value = p.content;
+  const enabled = el("input", { type: "checkbox", style: { width: "15px", height: "15px", accentColor: "var(--accent)" } });
+  enabled.checked = !!p.enabled;
+  D.packTitle = title; D.packTags = tags; D.packContent = content; D.packEnabled = enabled;
+
+  const field = (label, node, hint) => el("div", { style: { marginBottom: "13px" } },
+    el("div", { style: { fontSize: "11px", fontWeight: "600", color: "var(--text-2)", marginBottom: "5px" } }, label),
+    node,
+    hint && el("div", { class: "loom-meta", style: { fontSize: "10.5px", marginTop: "4px" } }, hint));
+
+  host.replaceChildren(el("div", { style: { maxWidth: "780px", margin: "0 auto", padding: "24px 26px 40px" } },
+    el("div", { style: { display: "flex", alignItems: "center", gap: "9px", marginBottom: "14px" } },
+      icon("pack", { s: 17, color: "var(--accent)" }),
+      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, isNew ? "新增 pack" : "編輯 pack"),
+      !isNew && el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, "#" + p.id)),
+    field("標題", title, "也會被當成比對關鍵字之一"),
+    field("標籤", tags, "對話時用 AI／關鍵字比對你的訊息；命中標題或任一標籤就注入這個 pack"),
+    field("內容", content),
+    el("label", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", cursor: "pointer", fontSize: "12.5px", color: "var(--text-2)" } },
+      enabled, "啟用（停用的 pack 不會被注入）"),
+    el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
+      el("button", { class: "loom-btn primary", onclick: doPackSave }, icon("check", { s: 14 }), isNew ? "建立" : "儲存"),
+      !isNew && el("button", { class: "loom-btn ghost", style: { color: "var(--del)" }, onclick: doPackDelete }, icon("trash", { s: 13 }), "刪除"),
+      el("div", { style: { flex: "1" } })),
+    packTestPanel()));
+}
+function packTestPanel() {
+  const input = el("input", { class: "loom-input", placeholder: "輸入一句使用者訊息，測試會選中哪些 pack…",
+    onkeydown: (e) => { if (e.key === "Enter") doPackTest(); } });
+  D.packTestInput = input;
+  D.packTestOut = el("div", { style: { marginTop: "10px" } });
+  return el("div", { style: { marginTop: "26px", paddingTop: "18px", borderTop: "1px solid var(--border)" } },
+    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "9px" } },
+      icon("flow", { s: 14, color: "var(--accent)" }),
+      el("div", { style: { fontSize: "13px", fontWeight: "700" } }, "測試比對"),
+      el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "模擬 pre_llm_call 的選取")),
+    el("div", { style: { display: "flex", gap: "8px" } }, input,
+      el("button", { class: "loom-btn", style: { flex: "0 0 auto" }, onclick: doPackTest }, "比對")),
+    D.packTestOut);
+}
+const doPackSave = guard(async function () {
+  const body = { title: D.packTitle.value, tags: parseTagsInput(D.packTags.value), content: D.packContent.value, enabled: D.packEnabled.checked };
+  if (S.packSel !== "new") body.id = S.packSel;
+  const res = await api.post("/packs/save", body);
+  S.packSel = res.id;
+  pushToast({ tone: "human", text: res.created ? "已新增 pack" : "已更新 pack" });
+  await renderPacks();
+});
+const doPackDelete = guard(async function () {
+  if (S.packSel === "new") return;
+  await api.post("/packs/delete", { id: S.packSel });
+  S.packSel = null;
+  pushToast({ tone: "human", text: "已刪除 pack" });
+  await renderPacks();
+});
+const doPackTest = guard(async function () {
+  const msg = (D.packTestInput.value || "").trim();
+  if (!msg) return;
+  D.packTestOut.replaceChildren(el("span", { class: "loom-meta" }, "比對中…"));
+  const r = await api.post("/recall", { message: msg });
+  const out = [];
+  out.push(el("div", { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", marginBottom: "8px" } },
+    el("span", { class: "loom-tag " + (r.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, r.method),
+    (r.tags || []).length ? el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "命中：") : el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "沒有命中任何 pack"),
+    ...packTagChips(r.tags || [])));
+  (r.records || []).forEach((rec) => out.push(el("div", { class: "loom-quote", style: { marginBottom: "7px" } },
+    el("div", { style: { fontWeight: "600", fontSize: "12.5px", marginBottom: "3px" } }, "【" + (rec.title || "") + "】"),
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", whiteSpace: "pre-wrap" } }, rec.value))));
+  D.packTestOut.replaceChildren(...out);
+});
+
 // ───────────────────────── boot ─────────────────────────
 function boot() {
   try { if (localStorage.getItem("loom-theme") === "dark") document.body.classList.add("dark"); } catch {}
@@ -1061,9 +1142,10 @@ function boot() {
   D.inspectorBody = el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, buildRail(), D.detail);
   D.soulBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   D.promptsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
+  D.packsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
   app.append(
     buildHeader(),
-    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.promptsBody),
+    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody),
     D.toasts);
   root.replaceChildren(app);
   loadRecords().catch((e) => {

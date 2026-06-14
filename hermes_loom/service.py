@@ -398,11 +398,6 @@ def build_records(ledger: Ledger) -> dict:
     for h in ledger.list_held():
         records.append(_build_held_record(h, states))
 
-    # attach tags (keyed by target_key) to every record
-    tm = ledger.tags_map()
-    for r in records:
-        r["tags"] = tm.get(r["target_key"], [])
-
     # Newest first. The rail claims "依時間", so order really is by ts desc.
     records.sort(key=lambda r: r.get("ts") or 0, reverse=True)
 
@@ -431,8 +426,6 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
     elif target_type == "hold":
         h = ledger.get_held(key)
         rec = _build_held_record(h, states) if h else None
-    if rec is not None:
-        rec["tags"] = ledger.get_tags(key)
     return rec
 
 
@@ -440,35 +433,67 @@ def _active_value(r: dict) -> str:
     return r["versions"][r["active"]]["value"]
 
 
-def record_set_tags(ledger: Ledger, target_key: str, tags: list) -> dict:
-    """Replace a record's tags. Keyed by target_key (content hash / skill name)."""
-    return {"tags": ledger.set_tags(target_key, tags)}
+# ---- packs (Loom-only middle memory layer) ----------------------------------
+
+def list_packs(ledger: Ledger) -> dict:
+    return {"packs": ledger.list_packs()}
+
+
+def save_pack(ledger: Ledger, *, pack_id=None, title: str, tags: list,
+              content: str, enabled: bool = True) -> dict:
+    """Create a pack (no id) or update an existing one (with id)."""
+    title = (title or "").strip()
+    if not title:
+        raise ValueError("title required")
+    if not (content or "").strip():
+        raise ValueError("content required")
+    if not isinstance(tags, list):
+        raise ValueError("tags must be a list")
+    if pack_id:
+        ok = ledger.update_pack(int(pack_id), title=title, tags=tags,
+                                content=content, enabled=enabled)
+        if not ok:
+            raise ValueError(f"pack {pack_id} not found")
+        return {"id": int(pack_id), "updated": True, "pack": ledger.get_pack(int(pack_id))}
+    new_id = ledger.create_pack(title, tags, content, enabled=enabled)
+    return {"id": new_id, "created": True, "pack": ledger.get_pack(new_id)}
+
+
+def delete_pack(ledger: Ledger, pack_id: int) -> dict:
+    ok = ledger.delete_pack(int(pack_id))
+    if not ok:
+        raise ValueError(f"pack {pack_id} not found")
+    return {"deleted": True, "id": int(pack_id)}
 
 
 def recall(ledger: Ledger, message: str, limit: int = 8,
            log: bool = False, session_id: Optional[str] = None) -> dict:
-    """Resolve relevant tags from a user message and return matching records'
-    content as injectable context. Used by the pre_llm_call hook.
+    """Select which packs to inject for a user message. Used by pre_llm_call.
 
-    When ``log`` is set and an injection happens, the result is recorded in
-    recall_log so the UI can show what was injected last."""
+    The user message is resolved (LLM or keyword) against the vocabulary of all
+    enabled packs' **titles and tags**; a pack is injected when its title or any
+    of its tags is matched. When ``log`` is set and packs are injected, the
+    result is recorded in recall_log for the UI."""
     from . import tagger
-    recs = build_records(ledger)["records"]
-    all_tags = sorted({t for r in recs for t in r.get("tags", [])})
-    if not all_tags:
+    packs = ledger.list_packs(enabled_only=True)
+    if not packs:
         return {"tags": [], "method": "none", "count": 0, "context": "", "records": []}
-    matched, method = tagger.resolve_tags(message, all_tags)
+    # vocabulary = every pack title + every tag (matched case-insensitively)
+    vocab = sorted({p["title"] for p in packs} | {t for p in packs for t in p["tags"]})
+    matched, method = tagger.resolve_tags(message, vocab)
     if not matched:
         return {"tags": [], "method": method, "count": 0, "context": "", "records": [],
                 "llm_configured": tagger.llm_configured()}
     mset = {t.lower() for t in matched}
-    hits = [r for r in recs if any(t.lower() in mset for t in r.get("tags", []))][:limit]
-    lines = ["（Hermes Loom 依標籤「" + "、".join(matched) + "」帶入你先前記住的相關資訊）"]
-    for r in hits:
-        v = _active_value(r)
-        lines.append("- " + (v if len(v) <= 300 else v[:300] + "…"))
-    context = "\n".join(lines) if hits else ""
-    out_records = [{"id": r["id"], "value": _active_value(r), "tags": r["tags"]} for r in hits]
+    hits = [p for p in packs
+            if p["title"].lower() in mset or any(t.lower() in mset for t in p["tags"])][:limit]
+    lines = ["（Hermes Loom 依「" + "、".join(matched) + "」帶入相關記憶 pack）"]
+    for p in hits:
+        lines.append("【" + p["title"] + "】\n" + p["content"])
+    context = "\n\n".join(lines) if hits else ""
+    out_records = [{"id": "pack:" + str(p["id"]), "title": p["title"],
+                    "value": (p["content"] if len(p["content"]) <= 300 else p["content"][:300] + "…"),
+                    "tags": p["tags"]} for p in hits]
     if log and hits:
         try:
             ledger.add_recall(message=message, method=method, tags=matched,
