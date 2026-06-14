@@ -61,6 +61,30 @@ class TestTaggerLLM(LoomTestCase):
         self.assertEqual(method, "llm")
         self.assertEqual(matched, ["food"])
 
+    def test_llm_param_shape_fallback(self):
+        # gpt-5-style: first variant (max_completion_tokens) "works"; ensure a
+        # 400 on the first variant retries the second instead of failing.
+        os.environ["LOOM_LLM_BASE_URL"] = "http://fake"
+        os.environ["LOOM_LLM_MODEL"] = "gpt-5"
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("LOOM_LLM_BASE_URL", "LOOM_LLM_MODEL")])
+        import urllib.error
+
+        class FakeResp:
+            def read(self): return json.dumps({"choices": [{"message": {"content": '["food"]'}}]}).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        calls = {"n": 0}
+        def fake_urlopen(req, timeout=None):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise urllib.error.HTTPError("u", 400, "Bad Request", {}, None)
+            return FakeResp()
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            matched, method = tagger.resolve_tags("cook for the allergy?", ["food"])
+        self.assertEqual(method, "llm")
+        self.assertEqual(matched, ["food"])
+        self.assertEqual(calls["n"], 2)  # fell back to the 2nd variant
+
     def test_llm_failure_falls_back_to_keyword(self):
         os.environ["LOOM_LLM_BASE_URL"] = "http://fake"
         os.environ["LOOM_LLM_MODEL"] = "m"

@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 from typing import List, Optional, Tuple
 
@@ -73,10 +74,26 @@ def _resolve_keyword(message: str, tags: List[str]) -> List[str]:
     return [t for t in tags if t.lower() in m]
 
 
+def _post_chat(url: str, headers: dict, payload: dict) -> dict:
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode("utf-8", "replace")[:400]
+        except Exception:  # noqa: BLE001
+            pass
+        raise RuntimeError(f"HTTP {e.code}: {body}") from e
+
+
 def _resolve_llm(message: str, tags: List[str]) -> Optional[List[str]]:
     base = os.environ["LOOM_LLM_BASE_URL"].rstrip("/")
     model = os.environ["LOOM_LLM_MODEL"]
     key = os.environ.get("LOOM_LLM_API_KEY", "")
+    max_toks = int(os.environ.get("LOOM_LLM_MAX_TOKENS", "1024"))
     url = base + "/chat/completions"
     sys_prompt = (
         "You map a user message to relevant tags. You are given a fixed list of "
@@ -85,24 +102,39 @@ def _resolve_llm(message: str, tags: List[str]) -> Optional[List[str]]:
         "No prose, no code fences."
     )
     user = "Allowed tags: " + json.dumps(tags, ensure_ascii=False) + "\nMessage: " + message
-    payload = {
+    base_payload = {
         "model": model,
         "messages": [{"role": "system", "content": sys_prompt},
                      {"role": "user", "content": user}],
-        "temperature": 0,
-        "max_tokens": 200,
     }
-    data = json.dumps(payload).encode("utf-8")
     headers = {"Content-Type": "application/json"}
     if key:
         headers["Authorization"] = "Bearer " + key
-    req = urllib.request.Request(url, data=data, headers=headers)
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as resp:
-        body = json.loads(resp.read())
-    content = (body.get("choices") or [{}])[0].get("message", {}).get("content", "")
-    picked = _parse_tag_array(content)
-    allowed = {t.lower(): t for t in tags}
-    return [allowed[p.lower()] for p in picked if p.lower() in allowed]
+
+    # Param compatibility: newer OpenAI models (gpt-5/o-series/4o) require
+    # `max_completion_tokens` and reject `temperature` != 1; older / other
+    # OpenAI-compatible endpoints only know `max_tokens`. Try modern first, then
+    # fall back on an HTTP 400.
+    variants = [
+        {**base_payload, "max_completion_tokens": max_toks},
+        {**base_payload, "max_tokens": max_toks, "temperature": 0},
+    ]
+    last_err = None
+    for v in variants:
+        try:
+            body = _post_chat(url, headers, v)
+            content = (body.get("choices") or [{}])[0].get("message", {}).get("content", "")
+            picked = _parse_tag_array(content)
+            allowed = {t.lower(): t for t in tags}
+            return [allowed[p.lower()] for p in picked if p.lower() in allowed]
+        except RuntimeError as e:
+            last_err = e
+            if " 400:" in str(e):
+                continue  # likely a param-shape mismatch; try the other variant
+            raise
+    if last_err:
+        raise last_err
+    return []
 
 
 def _parse_tag_array(content: str) -> List[str]:
