@@ -43,11 +43,20 @@ def parse_entries(content: str) -> List[dict]:
 
 
 def serialize_entries(entries: List[dict]) -> str:
-    """Rejoin entry dicts (or raw strings) back into file content."""
+    """Rejoin entry dicts (or raw strings) back into file content.
+
+    The separator MUST be byte-identical to Hermes' canonical
+    ``ENTRY_DELIMITER = "\\n§\\n"`` (see ``tools/memory_tool.py``). Hermes
+    refuses to write a memory file whose on-disk content does not round-trip
+    through ``"\\n§\\n".join(stripped_entries)`` — it treats the mismatch as
+    external drift and backs the file up to ``.bak.<ts>``. An earlier blank-line
+    variant (``"\\n\\n§\\n"``) jammed Hermes out of USER.md entirely, so keep
+    this in lockstep with the runtime delimiter.
+    """
     texts = []
     for e in entries:
         texts.append(e["text"] if isinstance(e, dict) else str(e))
-    body = "\n\n§\n".join(t.strip() for t in texts)
+    body = "\n§\n".join(t.strip() for t in texts)
     return body + "\n" if body else ""
 
 
