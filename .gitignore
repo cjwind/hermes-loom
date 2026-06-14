@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+# Loom runtime state (never commit a user's ledger/backups)
+ledger.db
+ledger.db-*
+*.loomtmp

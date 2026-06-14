@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hermes-loom"
+version = "0.1.0"
+description = "Local growth-observability & tuning sidecar for Hermes Agent"
+readme = "README.md"
+requires-python = ">=3.10"
+# Intentionally ZERO runtime dependencies — stdlib only (sqlite3 + http.server),
+# so the MVP runs on any machine that already runs Hermes, with no install step.
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed if you prefer FastAPI/uvicorn over the bundled stdlib server.
+fastapi = ["fastapi>=0.110", "uvicorn>=0.27"]
+test = []  # tests use stdlib unittest
+
+[project.scripts]
+hermes-loom = "hermes_loom.cli:main"
+
+# Hermes discovers plugins via this entry-point group. The plugin loader calls
+# `register(ctx)` on the referenced object. If your Hermes build uses a different
+# discovery mechanism, see README "Install the plugin" for the manual fallback.
+[project.entry-points."hermes.plugins"]
+hermes_loom = "hermes_loom.plugin:register"
+
+[tool.setuptools]
+packages = ["hermes_loom"]

@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hermes Loom</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header>
+    <h1>🧵 Hermes Loom</h1>
+    <nav>
+      <a href="#/growth">Recent Growth</a>
+      <a href="#/memory">Current Memory</a>
+      <a href="#/skills">Skills</a>
+      <button id="btn-sync" title="Ingest state.db + reconcile snapshots">Sync</button>
+    </nav>
+  </header>
+  <main id="app">Loading…</main>
+  <footer>
+    <span id="status"></span>
+    <span class="muted">local-first · sidecar · append-only ledger</span>
+  </footer>
+  <script src="/app.js"></script>
+</body>
+</html>
