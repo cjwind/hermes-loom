@@ -258,6 +258,7 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | POST | `/records/delete` | soft-delete (memory entry removed / skill disabled) |
 | POST | `/records/add` | `{store_type, text}` → append entry (used for delete-undo) |
 | POST | `/records/annotate` | `{target_type, target_key, text}` → private note (Loom-side only) |
+| POST | `/records/recategorize` | `{target_type, target_key, to_cat}` → **move** the entry between MEMORY.md/USER.md (記憶↔偏好) |
 | POST | `/records/pin` | `{target_type, target_key, pinned}` |
 | POST | `/overrides/memory/edit` | `{store_type, entry_key, new_text, reason?}` |
 | POST | `/overrides/memory/delete` | `{store_type, entry_key, reason?}` |
@@ -287,6 +288,11 @@ to refresh snapshots from the current live files, so the output always reflects
 the latest state (even changes Loom hadn't observed yet). The implicit sync is
 skipped when `--as-of` is given (you explicitly want a past state) or with
 `--no-sync`.
+
+Category controls where an entry lives: **記憶 → MEMORY.md, 偏好 → USER.md**.
+Recategorizing a record (UI「改分類」or `POST /records/recategorize`) physically
+moves the entry between those files immediately (with snapshot + backup), so it
+compiles to the new location.
 
 Default output is a **dir** (`memories/` + `skills/` tree, never modifies
 `~/.hermes`). `--in-place` overwrites the live files, taking a timestamped backup

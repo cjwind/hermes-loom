@@ -211,6 +211,25 @@ async function doPin(r) {
   await loadRecords((x) => x.id === r.id);
 }
 
+// Change category = physically move the entry between MEMORY.md / USER.md.
+const CAT_FILE = { memory: "MEMORY.md", pref: "USER.md" };
+async function doRecat(r, toCat) {
+  const fromCat = r.cat;
+  S.mode = null;
+  const res = await api.post("/records/recategorize",
+    { target_type: r.target_type, target_key: r.target_key, to_cat: toCat });
+  await loadRecords((x) => x.id === res.new_id);
+  pushToast({
+    tone: "human",
+    text: `已改分類為「${catLabel(toCat)}」，資料移到 ${CAT_FILE[toCat] || "?"}`,
+    onUndo: async () => {
+      await api.post("/records/recategorize",
+        { target_type: res.to_target_type, target_key: res.new_key, to_cat: fromCat }).catch(() => {});
+      await loadRecords((x) => x.id === r.id);
+    },
+  });
+}
+
 // Skill records carry only their description in the list; the full SKILL.md is
 // fetched lazily on demand (and cached on the record).
 function ensureSkillContent(r) {
@@ -413,6 +432,7 @@ function renderDetail() {
     S.mode === "edit" ? editor(r, val) : el("div", { style: { fontSize: "18px", fontWeight: "600", letterSpacing: "-0.3px", lineHeight: "1.35", textWrap: "pretty" } }, val),
     S.mode !== "edit" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "4px" } }, r.detail),
     S.mode === null && actionRow(r),
+    S.mode === "recat" && recatComposer(r),
     S.mode === "anno" && annoComposer(r)));
 
   const body = el("div", { style: { flex: "1", overflow: "auto", padding: "20px 26px" } });
@@ -449,6 +469,7 @@ function actionRow(r) {
   const isSkill = r.target_type === "skill";
   return el("div", { style: { display: "flex", gap: "8px", marginTop: "14px", position: "relative" } },
     el("button", { class: "loom-btn", onclick: () => enterEdit(r) }, icon("pencil", { s: 13 }), isSkill ? "編輯內容" : "編輯"),
+    !isSkill && el("button", { class: "loom-btn", onclick: () => { S.mode = "recat"; renderDetail(); } }, icon("flow", { s: 13 }), "改分類"),
     el("button", { class: "loom-btn", onclick: () => enterAnno(r) }, icon("note", { s: 13 }), r.annotation ? "編輯註解" : "加註解"),
     el("div", { style: { flex: "1" } }),
     el("button", { class: "loom-btn", onclick: () => doPin(r) }, icon("pin", { s: 13 }), r.pinned ? "取消釘選" : "釘選"),
@@ -535,6 +556,28 @@ function enterAnno(r) {
   S.mode = "anno"; S.draft = r.annotation ? r.annotation.text : "";
   renderDetail();
   if (D.annoTa) D.annoTa.focus();
+}
+function recatComposer(r) {
+  const movable = S.cats.filter((c) => c.k === "memory" || c.k === "pref");
+  return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "10px" }, html:
+      "改分類會把這條<b style='color:var(--text)'>實際搬移</b>到對應檔案（記憶→MEMORY.md、偏好→USER.md），並先自動備份。" }),
+    el("div", { style: { display: "flex", gap: "7px", flexWrap: "wrap" } },
+      ...movable.map((c) => {
+        const cur = c.k === r.cat;
+        return el("button", {
+          class: "loom-tag", disabled: cur ? "" : null,
+          style: { height: "28px", padding: "0 12px", cursor: cur ? "default" : "pointer",
+            border: "1px solid " + (cur ? "var(--accent-line)" : "var(--border-2)"),
+            background: cur ? "var(--accent-soft)" : "var(--surface)",
+            color: cur ? "var(--accent-ink)" : "var(--text)", opacity: cur ? ".7" : "1" },
+          onclick: cur ? null : () => doRecat(r, c.k),
+        },
+          el("span", { style: { width: "7px", height: "7px", borderRadius: "2px", background: "var(--cat-" + c.k + ")", display: "inline-block", marginRight: "6px" } }),
+          c.label + (cur ? " · 目前" : " → " + (CAT_FILE[c.k] || "")));
+      })),
+    el("div", { style: { display: "flex", marginTop: "11px" } },
+      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
 }
 function annoComposer(r) {
   const ta = el("textarea", {

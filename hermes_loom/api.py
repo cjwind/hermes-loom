@@ -155,6 +155,16 @@ def h_record_add(ledger, params, query, body):
         return 400, {"ok": False, "error": str(e)}
 
 
+@route("POST", r"/api/records/recategorize")
+def h_record_recategorize(ledger, params, query, body):
+    try:
+        tt, tk = _record_target(body)
+        res = service.record_recategorize(ledger, tt, tk, body["to_cat"], reason=body.get("reason"))
+        return 200, {"ok": True, **res}
+    except (KeyError, OverrideError) as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
 @route("POST", r"/api/records/annotate")
 def h_record_annotate(ledger, params, query, body):
     try:

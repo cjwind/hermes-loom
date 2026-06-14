@@ -97,6 +97,46 @@ class TestRecords(LoomTestCase):
         self.assertEqual(d["annotation"]["text"], "只在工作情境適用")
         self.assertTrue(d["pinned"])
 
+    def test_recategorize_moves_entry_between_files(self):
+        self.write_memory("memory", "remember tea")
+        self.write_memory("user", "prefers dark mode")
+        led = self.ledger()
+        recs = service.build_records(led)["records"]
+        mem = next(r for r in recs if r["target_type"] == "memory")
+        res = service.record_recategorize(led, mem["target_type"], mem["target_key"], "pref")
+        # physically moved: gone from MEMORY.md, present in USER.md
+        self.assertNotIn("remember tea", (self.hermes_home / "memories" / "MEMORY.md").read_text())
+        user_txt = (self.hermes_home / "memories" / "USER.md").read_text()
+        self.assertIn("remember tea", user_txt)
+        self.assertIn("prefers dark mode", user_txt)  # existing entry kept
+        self.assertEqual(res["to_target_type"], "user")
+        self.assertTrue(res["new_id"].startswith("user:"))
+        self.assertTrue(res["backups"])
+
+    def test_recategorize_then_compiles_to_new_file(self):
+        self.write_memory("memory", "remember tea")
+        led = self.ledger()
+        mem = next(r for r in service.build_records(led)["records"] if r["target_type"] == "memory")
+        service.record_recategorize(led, "memory", mem["target_key"], "pref")
+        # the moved entry now shows up as a 偏好 (user) record
+        recs2 = service.build_records(led)["records"]
+        moved = next(r for r in recs2 if "remember tea" in r["versions"][r["active"]]["value"])
+        self.assertEqual(moved["target_type"], "user")
+        self.assertEqual(moved["cat"], "pref")
+
+    def test_recategorize_skill_rejected(self):
+        self.write_skill("productivity", "demo", "---\nname: demo\n---\nbody\n")
+        led = self.ledger()
+        with self.assertRaises(overrides.OverrideError):
+            service.record_recategorize(led, "skill", "demo", "memory")
+
+    def test_recategorize_same_category_rejected(self):
+        self.write_memory("memory", "x")
+        led = self.ledger()
+        mem = next(r for r in service.build_records(led)["records"] if r["target_type"] == "memory")
+        with self.assertRaises(overrides.OverrideError):
+            service.record_recategorize(led, "memory", mem["target_key"], "memory")
+
     def test_skill_detail_has_full_content_and_edit_rewrites_file(self):
         self.write_memory("user", "x")
         skill_md = self.write_skill("productivity", "demo",

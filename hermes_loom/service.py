@@ -367,6 +367,26 @@ def record_edit(ledger: Ledger, target_type: str, key: str, new_value: str, reas
     raise overrides.OverrideError(f"unknown target_type {target_type}")
 
 
+# Category ⇄ store: category controls which file an entry lives in.
+_CAT_TO_STORE = {"memory": "memory", "pref": "user"}
+
+
+def record_recategorize(ledger: Ledger, target_type: str, key: str, to_cat: str, reason=None):
+    """Move a memory/user entry to the file matching the new category.
+
+    記憶(memory)→MEMORY.md, 偏好(pref)→USER.md. Skills can't be recategorized.
+    Returns the move result plus the record's new id (target_type:new_key).
+    """
+    if target_type not in ("memory", "user"):
+        raise overrides.OverrideError("只有記憶/偏好可以改分類（技能不適用）")
+    to_store = _CAT_TO_STORE.get(to_cat)
+    if to_store is None:
+        raise overrides.OverrideError(f"無法把記憶/偏好改成「{to_cat}」")
+    res = overrides.move_memory_entry(ledger, target_type, key, to_store, reason=reason)
+    res["new_id"] = f"{res['to_target_type']}:{res['new_key']}"
+    return res
+
+
 def record_delete(ledger: Ledger, target_type: str, key: str, reason=None):
     if target_type in ("memory", "user"):
         return overrides.delete_memory_entry(ledger, target_type, key, reason=reason)

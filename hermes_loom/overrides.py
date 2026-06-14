@@ -222,6 +222,79 @@ def edit_skill(
     return {"event_id": event_id, "backup": str(backup)}
 
 
+def move_memory_entry(
+    ledger: Ledger, from_store: str, entry_key: str, to_store: str,
+    *, reason: Optional[str] = None, applied_by: str = "loom-ui",
+) -> dict:
+    """Move a single entry between MEMORY.md and USER.md (recategorize).
+
+    Category controls where data lives: 記憶→MEMORY.md, 偏好→USER.md. Changing
+    category physically relocates the entry — removed from the source file, added
+    to the destination file — so compile/Hermes both see it in the new place.
+    Both files are snapshotted + backed up first; the write is per-entry.
+    """
+    from .memory_parser import entry_key as _ekey
+    if from_store not in ("memory", "user") or to_store not in ("memory", "user"):
+        raise OverrideError("only memory/user entries can be recategorized")
+    if from_store == to_store:
+        raise OverrideError("source and destination categories are the same")
+
+    src = _memory_path(from_store)
+    if not src.exists():
+        raise OverrideError(f"{from_store} file does not exist: {src}")
+    src_content = src.read_text(encoding="utf-8")
+    src_entries = parse_entries(src_content)
+    target = next((e for e in src_entries if e["key"] == entry_key), None)
+    if target is None:
+        raise OverrideError(f"entry {entry_key} not found in {from_store}")
+    text = target["text"]
+
+    dst = _memory_path(to_store)
+    dst_content = dst.read_text(encoding="utf-8") if dst.exists() else ""
+    dst_entries = parse_entries(dst_content)
+    new_key = _ekey(text)
+    if any(e["key"] == new_key for e in dst_entries):
+        raise OverrideError("an identical entry already exists in the destination")
+
+    # snapshot + backup both files before touching them
+    ledger.add_memory_snapshot(from_store, src_content, _sha(src_content))
+    ledger.add_memory_snapshot(to_store, dst_content, _sha(dst_content))
+    src_backup = _backup_file(src)
+    dst_backup = _backup_file(dst) if dst.exists() else None
+
+    from_tt = "user" if from_store == "user" else "memory"
+    to_tt = "user" if to_store == "user" else "memory"
+    try:
+        _atomic_write(src, serialize_entries([e for e in src_entries if e["key"] != entry_key]))
+        dst_entries.append({"key": new_key, "text": text})
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(dst, serialize_entries(dst_entries))
+    except OSError as e:
+        raise OverrideError(f"failed to move entry: {e}") from e
+
+    ledger.add_override(
+        target_type=to_tt, target_key=new_key, override_type="reclassify",
+        before_text=f"[{from_tt}] {text}", after_text=f"[{to_tt}] {text}",
+        reason=reason, applied_by=applied_by)
+    ev_out = ledger.add_event(
+        kind="memory_removed", target_type=from_tt, action="recategorize_out",
+        target_key=entry_key, target_path=str(src), before_text=text,
+        source_hint="manual_override", tool_name="loom", status="edited",
+        metadata={"manual": True, "moved_to": to_tt, "backup": str(src_backup), "reason": reason})
+    ev_in = ledger.add_event(
+        kind="memory_added", target_type=to_tt, action="recategorize_in",
+        target_key=new_key, target_path=str(dst), after_text=text,
+        source_hint="manual_override", tool_name="loom", status="edited",
+        metadata={"manual": True, "moved_from": from_tt, "backup": str(dst_backup), "reason": reason})
+    nc_src = src.read_text(encoding="utf-8")
+    ledger.add_memory_snapshot(from_store, nc_src, _sha(nc_src), source_event_id=ev_out)
+    nc_dst = dst.read_text(encoding="utf-8")
+    ledger.add_memory_snapshot(to_store, nc_dst, _sha(nc_dst), source_event_id=ev_in)
+    return {"new_key": new_key, "to_store": to_store, "to_target_type": to_tt,
+            "from_target_type": from_tt, "text": text,
+            "backups": [str(src_backup)] + ([str(dst_backup)] if dst_backup else [])}
+
+
 def annotate_record(ledger: Ledger, target_type: str, target_key: str,
                     text: str, *, applied_by: str = "loom-ui") -> dict:
     """Attach (or clear, if empty) a private note to a record.
