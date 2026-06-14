@@ -352,6 +352,11 @@ def build_records(ledger: Ledger) -> dict:
     for h in ledger.list_held():
         records.append(_build_held_record(h, states))
 
+    # attach tags (keyed by target_key) to every record
+    tm = ledger.tags_map()
+    for r in records:
+        r["tags"] = tm.get(r["target_key"], [])
+
     # Newest first. The rail claims "依時間", so order really is by ts desc.
     records.sort(key=lambda r: r.get("ts") or 0, reverse=True)
 
@@ -363,25 +368,57 @@ def build_records(ledger: Ledger) -> dict:
 def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
     target_type, _, key = record_id.partition(":")
     states = ledger.all_record_states()
+    rec = None
     if target_type in ("memory", "user"):
         content = hermes_state.read_memory(target_type)
         ent = next((e for e in parse_entries(content or "") if e["key"] == key), None)
-        if not ent:
-            return None
-        return _build_record(ledger, target_type, key, ent["text"], states)
-    if target_type == "skill":
+        if ent:
+            rec = _build_record(ledger, target_type, key, ent["text"], states)
+    elif target_type == "skill":
         full = hermes_state.read_skill(key)
-        if not full:
-            return None
-        val = full.get("description") or key
-        rec = _build_record(ledger, "skill", key, val, states,
-                            detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
-                            skill_content=full["content"])
-        return _tag_skill_origin(rec, full)
-    if target_type == "hold":
+        if full:
+            val = full.get("description") or key
+            rec = _build_record(ledger, "skill", key, val, states,
+                                detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
+                                skill_content=full["content"])
+            rec = _tag_skill_origin(rec, full)
+    elif target_type == "hold":
         h = ledger.get_held(key)
-        return _build_held_record(h, states) if h else None
-    return None
+        rec = _build_held_record(h, states) if h else None
+    if rec is not None:
+        rec["tags"] = ledger.get_tags(key)
+    return rec
+
+
+def _active_value(r: dict) -> str:
+    return r["versions"][r["active"]]["value"]
+
+
+def record_set_tags(ledger: Ledger, target_key: str, tags: list) -> dict:
+    """Replace a record's tags. Keyed by target_key (content hash / skill name)."""
+    return {"tags": ledger.set_tags(target_key, tags)}
+
+
+def recall(ledger: Ledger, message: str, limit: int = 8) -> dict:
+    """Resolve relevant tags from a user message and return matching records'
+    content as injectable context. Used by the pre_llm_call hook."""
+    from . import tagger
+    recs = build_records(ledger)["records"]
+    all_tags = sorted({t for r in recs for t in r.get("tags", [])})
+    if not all_tags:
+        return {"tags": [], "method": "none", "count": 0, "context": "", "records": []}
+    matched, method = tagger.resolve_tags(message, all_tags)
+    if not matched:
+        return {"tags": [], "method": method, "count": 0, "context": "", "records": []}
+    mset = {t.lower() for t in matched}
+    hits = [r for r in recs if any(t.lower() in mset for t in r.get("tags", []))][:limit]
+    lines = ["（Hermes Loom 依標籤「" + "、".join(matched) + "」帶入你先前記住的相關資訊）"]
+    for r in hits:
+        v = _active_value(r)
+        lines.append("- " + (v if len(v) <= 300 else v[:300] + "…"))
+    context = "\n".join(lines) if hits else ""
+    return {"tags": matched, "method": method, "count": len(hits), "context": context,
+            "records": [{"id": r["id"], "value": _active_value(r), "tags": r["tags"]} for r in hits]}
 
 
 # -- inspector mutations -----------------------------------------------------

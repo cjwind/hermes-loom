@@ -258,7 +258,10 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | POST | `/records/delete` | soft-delete (memory entry removed / skill disabled) |
 | POST | `/records/add` | `{store_type, text}` → append entry (used for delete-undo) |
 | POST | `/records/annotate` | `{target_type, target_key, text}` → private note (Loom-side only) |
-| POST | `/records/recategorize` | `{target_type, target_key, to_cat}` → **move** the entry between MEMORY.md/USER.md (記憶↔偏好) |
+| POST | `/records/recategorize` | `{target_type, target_key, to_cat}` → **move** the entry between MEMORY.md/USER.md (記憶↔偏好/暫存) |
+| POST | `/records/tags` | `{target_type, target_key, tags: [...]}` → set a record's tags |
+| GET | `/tags` | all tags in use |
+| POST | `/recall` | `{message}` → resolve relevant tags from a message + return matching records as context (used by the pre_llm_call hook) |
 | POST | `/records/pin` | `{target_type, target_key, pinned}` |
 | POST | `/overrides/memory/edit` | `{store_type, entry_key, new_text, reason?}` |
 | POST | `/overrides/memory/delete` | `{store_type, entry_key, reason?}` |
@@ -304,6 +307,28 @@ snapshot at or before that time (epoch, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM`).
 
 Reconstruction is byte-exact for anything Loom has snapshotted. (Event-log replay
 is *not* used — snapshots are the exact, reliable source; see docs/ARCHITECTURE.md.)
+
+## Tags & context recall (pre_llm_call)
+
+Each record can carry multiple **tags** (UI「標籤」or `POST /records/tags`). The
+plugin binds Hermes' **`pre_llm_call`** hook: before every model call it reads the
+user's message, resolves which tags are relevant, and injects the matching tagged
+records into the turn's context (never the system prompt — cache-safe, ephemeral).
+This is recall without being a memory provider.
+
+Tag resolution (in `tagger.py`):
+- **Semantic (LLM)** when an OpenAI-compatible endpoint is configured via env:
+  - `LOOM_LLM_BASE_URL` (e.g. `https://api.openai.com/v1`)
+  - `LOOM_LLM_MODEL` (e.g. `gpt-4o-mini`)
+  - `LOOM_LLM_API_KEY` (optional), `LOOM_LLM_TIMEOUT` (default 8s)
+  The model is asked to pick relevant tags (verbatim) from the existing tag list.
+- **Keyword fallback** (substring match) when no LLM is configured, or if the call
+  fails/times out. Always offline-safe.
+
+Because the hook runs in the gateway process, set the env vars where the gateway
+runs (e.g. the systemd unit's `Environment=`). The recall adds one short LLM
+round-trip per turn when configured; it no-ops instantly if no tags exist or none
+match. Try it: `POST /api/recall {"message": "..."}`.
 
 ## Manual tuning safety
 

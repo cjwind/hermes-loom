@@ -122,6 +122,16 @@ CREATE TABLE IF NOT EXISTS held_entries (
     metadata_json TEXT
 );
 
+-- Tags: each record may have many tags. Keyed by target_key alone (content hash
+-- for memory/user/hold; skill name for skills) so tags follow the content across
+-- files. Used by the pre_llm_call recall hook.
+CREATE TABLE IF NOT EXISTS record_tags (
+    target_key TEXT NOT NULL,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (target_key, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_tags_tag ON record_tags(tag);
+
 -- Per-record UI/tuning state for the Inspector: pin, reclassify, annotation.
 -- Keyed by (target_type, target_key). Best-effort: memory keys are content
 -- hashes, so pins/notes are re-anchored on the new key after an edit.
@@ -409,6 +419,34 @@ class Ledger:
     def all_record_states(self) -> dict:
         rows = self.conn.execute("SELECT * FROM record_state").fetchall()
         return {(r["target_type"], r["target_key"]): dict(r) for r in rows}
+
+    # -- tags ---------------------------------------------------------------
+    def set_tags(self, target_key: str, tags: list[str]) -> list[str]:
+        clean, seen = [], set()
+        for t in tags or []:
+            t = str(t).strip()
+            if t and t.lower() not in seen:
+                seen.add(t.lower()); clean.append(t)
+        with self._lock:
+            self.conn.execute("DELETE FROM record_tags WHERE target_key=?", (target_key,))
+            self.conn.executemany("INSERT INTO record_tags(target_key,tag) VALUES(?,?)",
+                                  [(target_key, t) for t in clean])
+            self.conn.commit()
+        return clean
+
+    def get_tags(self, target_key: str) -> list[str]:
+        return [r["tag"] for r in self.conn.execute(
+            "SELECT tag FROM record_tags WHERE target_key=? ORDER BY tag", (target_key,)).fetchall()]
+
+    def tags_map(self) -> dict:
+        out: dict = {}
+        for r in self.conn.execute("SELECT target_key, tag FROM record_tags").fetchall():
+            out.setdefault(r["target_key"], []).append(r["tag"])
+        return out
+
+    def all_tags(self) -> list[str]:
+        return [r["tag"] for r in self.conn.execute(
+            "SELECT DISTINCT tag FROM record_tags ORDER BY tag").fetchall()]
 
     # -- held (HOLD) entries — Loom-only, never compiled --------------------
     def add_held(self, key: str, text: str, from_store: Optional[str] = None,

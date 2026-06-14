@@ -180,6 +180,29 @@ def h_record_annotate(ledger, params, query, body):
         return 400, {"ok": False, "error": str(e)}
 
 
+@route("POST", r"/api/records/tags")
+def h_record_tags(ledger, params, query, body):
+    try:
+        _tt, tk = _record_target(body)
+        tags = body.get("tags")
+        if not isinstance(tags, list):
+            raise KeyError("tags (list) required")
+        return 200, {"ok": True, **service.record_set_tags(ledger, tk, tags)}
+    except KeyError as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("GET", r"/api/tags")
+def h_tags(ledger, params, query, body):
+    return 200, {"tags": ledger.all_tags()}
+
+
+@route("POST", r"/api/recall")
+def h_recall(ledger, params, query, body):
+    msg = body.get("message", "")
+    return 200, service.recall(ledger, msg, limit=int(body.get("limit", 8)))
+
+
 @route("POST", r"/api/records/pin")
 def h_record_pin(ledger, params, query, body):
     try:

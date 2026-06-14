@@ -34,6 +34,7 @@ const ICONS = {
   pin: '<path d="M6 2h4l-.5 4 2 2.5H4.5L6.5 6 6 2zM8 8.5V14"/>',
   flow: '<g><circle cx="3.5" cy="8" r="1.8"/><circle cx="12.5" cy="3.5" r="1.8"/><circle cx="12.5" cy="12.5" r="1.8"/><path d="M5.3 8h2M9 4.5l1.7-.6M9 11.5l1.7.6M7.5 8c2 0 1.5-3.5 3.3-3.9M7.5 8c2 0 1.5 3.5 3.3 3.9"/></g>',
   clock: '<g><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5"/></g>',
+  tag: '<g><path d="M2.5 2.5h5L13 8l-5 5-5.5-5.5v-5z"/><circle cx="5" cy="5" r="1" fill="currentColor" stroke="none"/></g>',
   plus: '<path d="M8 3v10M3 8h10"/>',
   check: '<path d="M3 8.5l3.2 3L13 4.5"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
@@ -445,7 +446,9 @@ function renderDetail() {
     S.mode === "edit" ? editor(r, val) : el("div", { style: { fontSize: "18px", fontWeight: "600", letterSpacing: "-0.3px", lineHeight: "1.35", textWrap: "pretty" } }, val),
     S.mode !== "edit" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "4px" } }, r.detail),
     S.mode === null && actionRow(r),
+    S.mode === null && tagsRow(r),
     S.mode === "recat" && recatComposer(r),
+    S.mode === "tags" && tagsComposer(r),
     S.mode === "anno" && annoComposer(r)));
 
   const body = el("div", { style: { flex: "1", overflow: "auto", padding: "20px 26px" } });
@@ -483,6 +486,7 @@ function actionRow(r) {
   return el("div", { style: { display: "flex", gap: "8px", marginTop: "14px", position: "relative" } },
     el("button", { class: "loom-btn", onclick: () => enterEdit(r) }, icon("pencil", { s: 13 }), isSkill ? "編輯內容" : "編輯"),
     !isSkill && el("button", { class: "loom-btn", onclick: () => { S.mode = "recat"; renderDetail(); } }, icon("flow", { s: 13 }), "改分類"),
+    el("button", { class: "loom-btn", onclick: () => { S.mode = "tags"; renderDetail(); } }, icon("tag", { s: 13 }), "標籤"),
     el("button", { class: "loom-btn", onclick: () => enterAnno(r) }, icon("note", { s: 13 }), r.annotation ? "編輯註解" : "加註解"),
     el("div", { style: { flex: "1" } }),
     el("button", { class: "loom-btn", onclick: () => doPin(r) }, icon("pin", { s: 13 }), r.pinned ? "取消釘選" : "釘選"),
@@ -570,6 +574,36 @@ function enterAnno(r) {
   renderDetail();
   if (D.annoTa) D.annoTa.focus();
 }
+function tagsRow(r) {
+  const tags = r.tags || [];
+  return el("div", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "10px", flexWrap: "wrap" } },
+    el("span", { class: "loom-mono", style: { fontSize: "10px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".05em" } }, "標籤"),
+    ...(tags.length
+      ? tags.map((t) => el("span", { class: "loom-tag", style: { height: "19px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t))
+      : [el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "（無 · 用於對話時自動帶入相關記憶）")]));
+}
+
+const doSetTags = guard(async function (r, tags) {
+  S.mode = null;
+  await api.post("/records/tags", { target_type: r.target_type, target_key: r.target_key, tags });
+  await loadRecords((x) => x.id === r.id || x.target_key === r.target_key);
+  pushToast({ tone: "human", text: tags.length ? "已更新標籤" : "已清除標籤" });
+});
+
+function tagsComposer(r) {
+  const input = el("input", { class: "loom-input", placeholder: "用逗號分隔，例如：飲食, 健康, 旅行",
+    value: (r.tags || []).join(", ") });
+  const parse = () => input.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
+  setTimeout(() => input.focus(), 0);
+  return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html:
+      "設定標籤（可多個）。對話時 Loom 會用 AI 判斷你的訊息跟哪些標籤相關，再把<b style='color:var(--text)'>有該標籤的資料</b>注入給模型。" }),
+    input,
+    el("div", { style: { display: "flex", gap: "8px", marginTop: "10px" } },
+      el("button", { class: "loom-btn primary", onclick: () => doSetTags(r, parse()) }, icon("check", { s: 13 }), "儲存標籤"),
+      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
+}
+
 function recatComposer(r) {
   const movable = S.cats.filter((c) => c.k === "memory" || c.k === "pref" || c.k === "hold");
   return el("div", { class: "loom-composer", style: { marginTop: "14px" } },

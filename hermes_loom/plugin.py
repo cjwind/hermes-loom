@@ -126,6 +126,21 @@ class LoomPlugin:
             metadata={"tool_call_id": tool_call_id, "result": res.get("message")},
         )
 
+    # -- context injection before the model call -----------------------------
+    def on_pre_llm_call(self, *, user_message="", **_kw):
+        """Read the user's message, resolve relevant tags (AI/keyword), and
+        inject matching tagged records as context. Returns {"context": ...} or None.
+        """
+        msg = user_message if isinstance(user_message, str) else (
+            user_message.get("content") if isinstance(user_message, dict) else "")
+        if not msg:
+            return None
+        from . import service
+        res = service.recall(self.ledger, msg)
+        if res.get("context"):
+            return {"context": res["context"]}
+        return None
+
     # -- startup safety net --------------------------------------------------
     def on_session_start(self, *_a, **_k):
         from . import snapshot
@@ -147,6 +162,8 @@ def register(ctx):
 
     if _register_hook(ctx, "post_tool_call", _safe(plugin.on_post_tool_call)):
         bound.append("post_tool_call")
+    if _register_hook(ctx, "pre_llm_call", _safe(plugin.on_pre_llm_call)):
+        bound.append("pre_llm_call")
     if _register_hook(ctx, "on_session_start", _safe(plugin.on_session_start)):
         bound.append("on_session_start")
 
