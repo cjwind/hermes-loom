@@ -21,8 +21,13 @@ sync: ## Import current memory+skills, then backfill events from state.db
 	$(PY) -m hermes_loom sync
 
 .PHONY: serve
-serve: ## Run the local API + UI (HOST/PORT overridable)
+serve: ## Run the local API + UI on 127.0.0.1 (HOST/PORT overridable)
 	$(PY) -m hermes_loom serve --host $(HOST) --port $(PORT)
+
+.PHONY: serve-lan
+serve-lan: ## Run on 0.0.0.0 for LAN access — WARNING: no auth, exposes write endpoints
+	@printf '\033[33m⚠  Binding 0.0.0.0:%s — Loom has no auth and can edit Hermes memory/skills.\n   Only do this on a trusted network.\033[0m\n' '$(PORT)'
+	$(PY) -m hermes_loom serve --host 0.0.0.0 --port $(PORT)
 
 .PHONY: status
 status: ## Print ledger event counts by kind
