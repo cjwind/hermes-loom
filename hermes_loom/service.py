@@ -265,8 +265,8 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
         "origin": (origin or {}).get("tool_name") or "Hermes",
         "session_id": sess,
         "raw": _raw_from_event(origin) or {"who": "Hermes", "parts": ["（找不到對應的原始對話片段）"]},
-        "extract": [value] if value else [],
-        "classify": [_cat_label(cat), _HINT_LABEL.get(hint, "由 Hermes 自動歸納")],
+        # Note: the design dropped the EXTRACT/CLASSIFY pipeline stages, so we no
+        # longer emit `extract`/`classify`. The category is carried by `cat`.
         "active": active,
         "versions": versions,
         "pinned": bool(st.get("pinned")),
@@ -286,10 +286,6 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
 # store (memory store → 記憶, user store → 偏好, skills → 技能). Hermes itself has
 # no categories; this is a fixed Loom-side label (manual reclassify was removed).
 _CAT_LABELS = {"memory": "記憶", "skill": "技能", "pref": "偏好"}
-
-
-def _cat_label(k: str) -> str:
-    return _CAT_LABELS.get(k, k)
 
 
 def _tag_skill_origin(rec: dict, skill: dict) -> dict:

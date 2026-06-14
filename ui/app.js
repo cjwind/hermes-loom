@@ -33,6 +33,7 @@ const ICONS = {
   moon: '<path d="M13 9.5A5.5 5.5 0 016.5 3a5.5 5.5 0 100 11c2.5 0 4.7-1.7 5.4-4z"/>',
   pin: '<path d="M6 2h4l-.5 4 2 2.5H4.5L6.5 6 6 2zM8 8.5V14"/>',
   flow: '<g><circle cx="3.5" cy="8" r="1.8"/><circle cx="12.5" cy="3.5" r="1.8"/><circle cx="12.5" cy="12.5" r="1.8"/><path d="M5.3 8h2M9 4.5l1.7-.6M9 11.5l1.7.6M7.5 8c2 0 1.5-3.5 3.3-3.9M7.5 8c2 0 1.5 3.5 3.3 3.9"/></g>',
+  clock: '<g><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5"/></g>',
   plus: '<path d="M8 3v10M3 8h10"/>',
   check: '<path d="M3 8.5l3.2 3L13 4.5"/>',
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
@@ -505,16 +506,13 @@ function annoComposer(r) {
       el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
 }
 
-// ───────────────────────── pipeline ─────────────────────────
-function pipeStage(n, mono, label, line, content) {
-  return el("div", { style: { display: "flex", gap: "14px" } },
-    el("div", { style: { width: "24px", flex: "0 0 auto", display: "flex", flexDirection: "column", alignItems: "center" } },
-      el("div", { style: { width: "24px", height: "24px", borderRadius: "50%", border: "1.5px solid var(--accent-line)", background: "var(--surface)", color: "var(--accent-ink)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "700", fontFamily: "IBM Plex Mono, monospace" } }, n),
-      line && el("div", { style: { flex: "1", width: "1.5px", background: "var(--border)", margin: "4px 0" } })),
-    el("div", { style: { flex: "1", paddingBottom: line ? "18px" : "0", minWidth: "0" } },
-      el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)", marginBottom: "7px" } },
-        mono, el("span", { style: { color: "var(--text-4)" } }, " · " + label)),
-      content));
+// ───────────────────────── provenance + content (two sections) ─────────────
+function sectionHead(iconName, title, right) {
+  return el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" } },
+    el("span", { style: { color: "var(--accent)", display: "flex" } }, icon(iconName, { s: 14 })),
+    el("span", { style: { fontSize: "12.5px", fontWeight: "600", color: "var(--text-2)" } }, title),
+    el("div", { style: { flex: "1" } }),
+    right);
 }
 function versionRow(r, ver, idx) {
   const active = idx === r.active;
@@ -531,37 +529,39 @@ function versionRow(r, ver, idx) {
 }
 function pipeline(r) {
   const vs = r.versions, stored = vs[r.active], prev = r.active > 0 ? vs[r.active - 1] : null;
-  const isSkill = r.target_type === "skill";
+  const edited = vs.length > 1;
+
+  // ── Section A — 來自這次對話 (provenance) ──
+  const jumpBtn = r.session_id
+    ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, "跳到對話 ›")
+    : null;
+  const sectionA = el("div", {},
+    sectionHead("link", "來自這次對話", jumpBtn),
+    el("div", { class: "loom-quote" },
+      el("span", { class: "who" }, r.raw.who + " · " + r.origin),
+      ...r.raw.parts.map((p) => typeof p === "string" ? el("span", {}, p) : el("em", {}, p.hl))),
+    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "9px", flexWrap: "wrap" } },
+      el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, r.originId),
+      el("span", { style: { color: "var(--text-4)" } }, "·"),
+      el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } }, icon("clock", { s: 12 }), r.when || "—"),
+      el("span", { style: { color: "var(--text-4)" } }, "·"),
+      el("span", { class: "loom-meta" }, "Hermes 從這段沉澱為 " + catLabel(r.cat))));
+
+  // ── Section B — Hermes 沉澱的內容 (value + version history when edited) ──
   const storedContent = prev
     ? el("div", {},
         el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html: "從 <span class='loom-mono'>" + prev.v + "</span> → <span class='loom-mono'>" + stored.v + "</span> 的變化：" }),
         el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px" } }, diffEl(prev.value, stored.value)))
-    : el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px", color: "var(--text)" } }, stored.value);
+    : el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 13px", background: "var(--surface)", fontSize: "14px", color: "var(--text)", lineHeight: "1.5" } }, stored.value);
 
-  const history = el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
-    el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, "版本歷史 · " + vs.length + " 版"),
-    ...vs.map((v, i) => versionRow(r, v, i)).reverse());
+  const sectionB = el("div", {},
+    sectionHead("spark", edited ? "Hermes 沉澱的內容 · 含你的調整" : "Hermes 沉澱的內容"),
+    storedContent,
+    edited && el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
+      el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, "版本歷史 · " + vs.length + " 版 · Hermes 的自動版本永遠保留"),
+      ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
 
-  return el("div", {},
-    el("div", { style: { fontSize: "12.5px", fontWeight: "600", color: "var(--text-2)", marginBottom: "16px", display: "flex", alignItems: "center", gap: "8px" } },
-      icon("flow", { s: 14, color: "var(--accent)" }), "這筆沉澱是怎麼來的"),
-    pipeStage("1", "RAW", "原始對話 · " + r.originId + " · " + r.when, true,
-      el("div", { class: "loom-quote" },
-        el("span", { class: "who" }, r.raw.who + " · " + r.origin),
-        ...r.raw.parts.map((p) => typeof p === "string" ? el("span", {}, p) : el("em", {}, p.hl)),
-        r.session_id && el("div", { style: { marginTop: "8px" } },
-          el("button", { class: "loom-tag tag-src", onclick: () => viewSession(r.session_id) }, icon("link", { s: 10 }), "看來源 session")))),
-    pipeStage("2", "EXTRACT", "Hermes 抽取", true,
-      el("div", { style: { fontSize: "13px", color: "var(--text)", lineHeight: "1.7" } },
-        "偵測到下列可沉澱項目：",
-        el("div", { style: { display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "7px" } },
-          ...r.extract.map((e) => el("span", { class: "loom-tag tag-auto", style: { height: "22px", maxWidth: "100%" } }, e.length > 80 ? e.slice(0, 80) + "…" : e))))),
-    pipeStage("3", "CLASSIFY", "分類", true,
-      el("div", { style: { fontSize: "13px", color: "var(--text)" } },
-        el("b", {}, r.classify[0]),
-        el("span", { style: { color: "var(--text-3)" } }, " — " + r.classify[1] + "。由 Hermes 自動完成，未改動其核心流程。"))),
-    pipeStage("4", "STORED", isTouched(r) ? "存入 · 含你的調整" : "存入", false,
-      el("div", {}, isSkill ? el("div", { style: { fontSize: "12px", color: "var(--text-3)", marginBottom: "8px" } }, "（技能內容較長，版本內容以摘要顯示）") : null, storedContent, history)));
+  return el("div", { style: { display: "flex", flexDirection: "column", gap: "22px" } }, sectionA, sectionB);
 }
 
 // session source viewer (modal)
