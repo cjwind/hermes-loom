@@ -11,6 +11,8 @@ Endpoints (see README for full list):
   GET  /api/soul                      (current SOUL.md: DB content + live-file sync)
   POST /api/soul/save                 (store edited SOUL content as a DB version)
   POST /api/soul/compile              (write DB SOUL content out to ~/.hermes/SOUL.md)
+  GET  /api/prompts                   (recent conversations with an assembled prompt)
+  GET  /api/prompts/{session_id}      (the final composed system prompt + outline)
   GET  /api/skills
   GET  /api/skills/{name}
   GET  /api/sessions/{id}/context
@@ -228,6 +230,23 @@ def h_record_pin(ledger, params, query, body):
         return 200, {"ok": True, **res}
     except KeyError as e:
         return 400, {"ok": False, "error": str(e)}
+
+
+# ---- assembled prompt viewer --------------------------------------------
+
+@route("GET", r"/api/prompts")
+def h_prompts(ledger, params, query, body):
+    limit = int(query.get("limit", ["40"])[0])
+    return 200, service.list_prompts(ledger, limit=limit)
+
+
+@route("GET", r"/api/prompts/(?P<id>[^/]+)")
+def h_prompt_detail(ledger, params, query, body):
+    from urllib.parse import unquote
+    detail = service.prompt_detail(ledger, unquote(params["id"]))
+    if not detail:
+        return 404, {"error": "no assembled prompt for that session"}
+    return 200, detail
 
 
 # ---- SOUL.md (Loom-owned identity file) ---------------------------------

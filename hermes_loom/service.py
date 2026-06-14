@@ -7,6 +7,7 @@ ledger, live content from Hermes, provenance from state.db).
 
 from __future__ import annotations
 
+import re
 import time
 from typing import Optional
 
@@ -56,6 +57,48 @@ def event_detail(ledger: Ledger, event_id: int) -> Optional[dict]:
         "source_message_window": e["source_message_window"],
         "metadata": e["metadata"],
         "related_overrides": related,
+    }
+
+
+# ---- assembled prompt viewer -------------------------------------------------
+
+_HEADING_RE = re.compile(r"^(#{1,4})\s+(.+?)\s*$")
+
+
+def list_prompts(ledger: Ledger, limit: int = 40) -> dict:
+    """Recent conversations whose final assembled system prompt we can show."""
+    sessions = hermes_state.recent_sessions_with_prompt(limit)
+    return {"count": len(sessions), "sessions": sessions}
+
+
+def _prompt_outline(text: str) -> list:
+    """Extract markdown headings so the UI can offer a jump-to outline."""
+    out = []
+    for i, line in enumerate(text.splitlines()):
+        m = _HEADING_RE.match(line)
+        if m:
+            out.append({"level": len(m.group(1)), "text": m.group(2), "line": i})
+    return out
+
+
+def prompt_detail(ledger: Ledger, session_id: str) -> Optional[dict]:
+    """The full assembled system prompt + metadata + outline for one session."""
+    row = hermes_state.get_assembled_prompt(session_id)
+    if not row:
+        return None
+    sp = row["system_prompt"]
+    return {
+        "session_id": row["id"],
+        "title": row.get("title"),
+        "source": row.get("source"),
+        "model": row.get("model"),
+        "started_at": row.get("started_at"),
+        "ended_at": row.get("ended_at"),
+        "message_count": row.get("message_count"),
+        "chars": len(sp),
+        "lines": sp.count("\n") + 1,
+        "system_prompt": sp,
+        "outline": _prompt_outline(sp),
     }
 
 

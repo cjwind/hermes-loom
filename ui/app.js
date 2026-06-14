@@ -34,6 +34,7 @@ const ICONS = {
   pin: '<path d="M6 2h4l-.5 4 2 2.5H4.5L6.5 6 6 2zM8 8.5V14"/>',
   flow: '<g><circle cx="3.5" cy="8" r="1.8"/><circle cx="12.5" cy="3.5" r="1.8"/><circle cx="12.5" cy="12.5" r="1.8"/><path d="M5.3 8h2M9 4.5l1.7-.6M9 11.5l1.7.6M7.5 8c2 0 1.5-3.5 3.3-3.9M7.5 8c2 0 1.5 3.5 3.3 3.9"/></g>',
   clock: '<g><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 1.5"/></g>',
+  layers: '<g><path d="M8 2l6 3-6 3-6-3 6-3z"/><path d="M2 8l6 3 6-3M2 11l6 3 6-3"/></g>',
   tag: '<g><path d="M2.5 2.5h5L13 8l-5 5-5.5-5.5v-5z"/><circle cx="5" cy="5" r="1" fill="currentColor" stroke="none"/></g>',
   plus: '<path d="M8 3v10M3 8h10"/>',
   check: '<path d="M3 8.5l3.2 3L13 4.5"/>',
@@ -106,6 +107,7 @@ const S = {
   filter: "all", query: "", humanOnly: false,
   toasts: [], mode: null, draft: "", menuOpen: false,
   view: "inspector", soul: null,
+  promptList: [], promptSel: null,
 };
 const D = {}; // persistent DOM refs
 
@@ -307,6 +309,7 @@ function buildHeader() {
 const NAV_VIEWS = [
   { k: "inspector", label: "檢視台", icon: "flow" },
   { k: "soul", label: "SOUL", icon: "spark" },
+  { k: "prompts", label: "Prompt", icon: "layers" },
 ];
 function buildNav() {
   const nav = el("div", { style: { display: "flex", gap: "2px", padding: "2px", borderRadius: "8px", background: "var(--surface-2)", marginLeft: "14px" } });
@@ -334,8 +337,10 @@ function setView(v) {
   S.view = v;
   if (D.inspectorBody) D.inspectorBody.style.display = v === "inspector" ? "flex" : "none";
   if (D.soulBody) D.soulBody.style.display = v === "soul" ? "block" : "none";
+  if (D.promptsBody) D.promptsBody.style.display = v === "prompts" ? "flex" : "none";
   paintNav();
   if (v === "soul") renderSoul();
+  if (v === "prompts") renderPrompts();
 }
 
 // Modal: recent context injections (from recall_log, written by the gateway hook)
@@ -892,6 +897,100 @@ const doSoulCompile = guard(async function () {
   await renderSoul();
 });
 
+// ───────────────────────── assembled prompt viewer ─────────────────────────
+async function renderPrompts() {
+  if (!D.promptList) {
+    D.promptList = el("div", { style: { width: "266px", flex: "0 0 auto", borderRight: "1px solid var(--border)", overflow: "auto", background: "var(--surface)" } });
+    D.promptDetail = el("div", { style: { flex: "1", overflow: "auto", background: "var(--bg)", minWidth: "0" } });
+    D.promptsBody.replaceChildren(D.promptList, D.promptDetail);
+  }
+  D.promptList.replaceChildren(el("div", { class: "loom-meta", style: { padding: "16px" } }, "載入對話清單…"));
+  let data;
+  try { data = await api.get("/prompts?limit=50"); }
+  catch (e) { D.promptList.replaceChildren(el("div", { class: "banner err", style: { margin: "14px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  S.promptList = data.sessions || [];
+  if (!S.promptList.length) {
+    D.promptList.replaceChildren(el("div", { class: "loom-empty", style: { padding: "30px 14px", textAlign: "center" } },
+      el("div", {}, "沒有可顯示的對話"),
+      el("div", { class: "loom-meta", style: { marginTop: "6px" } }, "找不到帶有 system_prompt 的 session（需要 Hermes 的 state.db）")));
+    D.promptDetail.replaceChildren();
+    return;
+  }
+  if (!S.promptSel || !S.promptList.find((s) => s.id === S.promptSel)) S.promptSel = S.promptList[0].id;
+  paintPromptList();
+  loadPromptDetail(S.promptSel);
+}
+function paintPromptList() {
+  D.promptList.replaceChildren(
+    el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "12px 12px 6px" } }, "最近的對話 · 最新在上"),
+    ...S.promptList.map((s) => {
+      const on = s.id === S.promptSel;
+      return el("button", {
+        style: { display: "block", width: "100%", textAlign: "left", border: "none", font: "inherit", cursor: "pointer", padding: "9px 12px", background: on ? "var(--surface-3)" : "transparent", boxShadow: on ? "inset 2px 0 0 var(--accent)" : "none" },
+        onclick: () => { S.promptSel = s.id; paintPromptList(); loadPromptDetail(s.id); },
+      },
+        el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, s.title || ("對話 " + (s.id || "").slice(0, 8))),
+        el("div", { style: { display: "flex", gap: "7px", alignItems: "center", marginTop: "3px", flexWrap: "wrap" } },
+          el("span", { class: "loom-meta", style: { fontSize: "10px" } }, fmtTime(s.started_at)),
+          s.model && el("span", { class: "loom-tag tag-auto", style: { height: "16px", padding: "0 5px", fontSize: "9px" } }, s.model),
+          el("span", { class: "loom-meta", style: { fontSize: "10px" } }, fmtInt(s.prompt_chars) + " 字")));
+    }));
+}
+const fmtInt = (n) => (n == null ? "0" : Number(n).toLocaleString());
+async function loadPromptDetail(sid) {
+  D.promptDetail.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, "載入組合後的 prompt…"));
+  let d;
+  try { d = await api.get("/prompts/" + encodeURIComponent(sid)); }
+  catch (e) { D.promptDetail.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  if (S.promptSel !== sid) return; // user switched away mid-load
+
+  const lines = (d.system_prompt || "").split("\n");
+  const offsets = []; let acc = 0;
+  for (const ln of lines) { offsets.push(acc); acc += ln.length + 1; }
+  const total = acc || 1;
+
+  const pre = el("pre", { style: { margin: "0", padding: "16px 18px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px", fontSize: "12.5px", lineHeight: "1.65", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", overflow: "auto", maxHeight: "62vh" } }, d.system_prompt || "（空）");
+
+  const jump = (line) => {
+    const frac = (offsets[line] || 0) / total;
+    pre.scrollTop = frac * (pre.scrollHeight - pre.clientHeight);
+  };
+  const outline = (d.outline || []).length
+    ? el("div", { style: { border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 6px", background: "var(--surface)", maxHeight: "62vh", overflow: "auto" } },
+        el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".05em", padding: "4px 8px 7px" } }, "組成大綱 · " + d.outline.length + " 段"),
+        ...d.outline.map((h) => el("button", {
+          style: { display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: "var(--text-2)", fontSize: "11.5px", padding: "3px 8px 3px " + (4 + (h.level - 1) * 12) + "px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", borderRadius: "5px" },
+          onmouseenter: (e) => e.target.style.background = "var(--surface-3)",
+          onmouseleave: (e) => e.target.style.background = "transparent",
+          onclick: () => jump(h.line),
+        }, h.text)))
+    : null;
+
+  const meta = el("div", { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "10px" } },
+    el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, icon("clock", { s: 11 }), fmtTime(d.started_at)),
+    d.model && el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, d.model),
+    d.source && el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, d.source),
+    el("span", { class: "loom-meta" }, "訊息 " + fmtInt(d.message_count) + " · " + fmtInt(d.chars) + " 字 · " + fmtInt(d.lines) + " 行"),
+    el("div", { style: { flex: "1" } }),
+    el("button", { class: "loom-btn ghost", onclick: () => doCopyPrompt(d.system_prompt) }, icon("link", { s: 13 }), "複製"));
+
+  const body = outline
+    ? el("div", { style: { display: "grid", gridTemplateColumns: "minmax(0,1fr) 230px", gap: "16px", alignItems: "start" } }, pre, outline)
+    : pre;
+
+  D.promptDetail.replaceChildren(el("div", { style: { padding: "20px 22px 32px" } },
+    el("div", { style: { display: "flex", alignItems: "center", gap: "9px", marginBottom: "4px" } },
+      icon("layers", { s: 17, color: "var(--accent)" }),
+      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, d.title || ("對話 " + (d.session_id || "").slice(0, 8))),
+      el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, d.session_id)),
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "13px" } }, "這就是 Hermes 在這個對話裡，最終組合送進模型的系統 prompt（SOUL + 記憶 + skills + 工具框架 + 收尾）。"),
+    meta, body));
+}
+const doCopyPrompt = guard(async function (text) {
+  await navigator.clipboard.writeText(text || "");
+  pushToast({ tone: "human", text: "已複製組合後的 prompt" });
+});
+
 // ───────────────────────── boot ─────────────────────────
 function boot() {
   try { if (localStorage.getItem("loom-theme") === "dark") document.body.classList.add("dark"); } catch {}
@@ -901,9 +1000,10 @@ function boot() {
   D.toasts = el("div", { class: "loom-toasts" });
   D.inspectorBody = el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, buildRail(), D.detail);
   D.soulBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
+  D.promptsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
   app.append(
     buildHeader(),
-    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody),
+    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.promptsBody),
     D.toasts);
   root.replaceChildren(app);
   loadRecords().catch((e) => {

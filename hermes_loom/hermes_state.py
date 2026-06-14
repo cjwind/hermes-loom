@@ -210,6 +210,59 @@ def gateway_status() -> dict:
         return {"known": False, "running": False}
 
 
+def recent_sessions_with_prompt(limit: int = 40) -> List[dict]:
+    """Recent sessions that carry an assembled ``system_prompt``, newest first.
+
+    The system prompt is the fully-composed identity/context Hermes sent to the
+    model (SOUL.md + memories + skills + tool framing + footer). We only list
+    sessions that actually have one so the prompt viewer never shows blanks.
+    """
+    conn = _connect_ro()
+    if not conn:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT id, title, source, model, provider, started_at, ended_at, "
+            "       message_count, length(system_prompt) AS prompt_chars, "
+            "       input_tokens, output_tokens "
+            "FROM sessions "
+            "WHERE system_prompt IS NOT NULL AND system_prompt != '' "
+            "ORDER BY started_at DESC, rowid DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    except sqlite3.OperationalError:
+        # Older Hermes schema without some columns — degrade to the essentials.
+        rows = conn.execute(
+            "SELECT id, title, source, model, started_at, message_count, "
+            "       length(system_prompt) AS prompt_chars "
+            "FROM sessions WHERE system_prompt IS NOT NULL AND system_prompt != '' "
+            "ORDER BY started_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_assembled_prompt(session_id: str) -> Optional[dict]:
+    """Return the assembled ``system_prompt`` + metadata for one session."""
+    conn = _connect_ro()
+    if not conn:
+        return None
+    try:
+        row = conn.execute(
+            "SELECT id, title, source, model, started_at, ended_at, message_count, "
+            "       system_prompt FROM sessions WHERE id=?",
+            (session_id,),
+        ).fetchone()
+        if not row or not row["system_prompt"]:
+            return None
+        return dict(row)
+    finally:
+        conn.close()
+
+
 def get_session_context(session_id: str, limit: int = 12) -> dict:
     """Best-effort simplified conversation context for a session.
 
