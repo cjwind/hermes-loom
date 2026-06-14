@@ -139,7 +139,7 @@ function visibleRecords() {
     .filter((r) => r.target_type !== "skill" || r.is_agent_created)
     .filter((r) => S.filter === "all" || r.cat === S.filter)
     .filter((r) => !S.humanOnly || isTouched(r))
-    .filter((r) => !q || (activeValue(r) + r.detail + r.origin).toLowerCase().includes(q));
+    .filter((r) => !q || (activeValue(r) + r.detail + r.origin + " " + (r.tags || []).join(" ")).toLowerCase().includes(q));
 }
 
 // ───────────────────────── toasts ─────────────────────────
@@ -422,7 +422,26 @@ function listRow(r) {
       el("span", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" } },
         el("span", { class: "loom-meta", style: { fontSize: "10.5px" } }, r.when || "—"),
         r.pinned && icon("pin", { s: 10, color: "var(--accent)" }),
-        isTouched(r) && el("span", { title: "人工調整過", style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } }))));
+        isTouched(r) && el("span", { title: "人工調整過", style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } })),
+      listTags(r)));
+}
+// Compact tag chips for a rail list row. Shows up to 3 tags + an overflow
+// count; renders nothing when the record has no tags. Clicking a chip filters
+// the list to that tag (same mechanism as the search box).
+const LIST_TAGS_MAX = 3;
+function listTags(r) {
+  const tags = r.tags || [];
+  if (!tags.length) return null;
+  const shown = tags.slice(0, LIST_TAGS_MAX);
+  const extra = tags.length - shown.length;
+  return el("span", { style: { display: "flex", alignItems: "center", flexWrap: "wrap", gap: "4px", marginTop: "4px" } },
+    icon("tag", { s: 9, color: "var(--text-4)" }),
+    ...shown.map((t) => el("span", {
+      class: "loom-tag", title: "篩選：" + t,
+      style: { height: "15px", padding: "0 5px", gap: "0", fontSize: "9.5px", fontWeight: "500", background: "var(--surface-3)", color: "var(--text-2)", cursor: "pointer" },
+      onclick: (e) => { e.stopPropagation(); S.query = t; D.search && (D.search.value = t); renderRailList(); },
+    }, t)),
+    extra > 0 && el("span", { class: "loom-meta", title: tags.slice(LIST_TAGS_MAX).join("、"), style: { fontSize: "9.5px", color: "var(--text-4)" } }, "+" + extra));
 }
 function renderRailList() {
   const vis = visibleRecords();
