@@ -107,6 +107,7 @@ const S = {
 };
 const D = {}; // persistent DOM refs
 
+const DIFF_MAX = 4000; // skip live char-diff above this (O(n·m) LCS would hang)
 const catLabel = (k) => (S.cats.find((c) => c.k === k) || {}).label || k;
 const activeValue = (r) => r.versions[r.active].value;
 const isTouched = (r) => r.versions.some((v) => v.kind === "human") || !!r.annotation || !!r.reclassified;
@@ -208,6 +209,29 @@ async function doAnnotate(r, text) {
 async function doPin(r) {
   await api.post("/records/pin", { target_type: r.target_type, target_key: r.target_key, pinned: !r.pinned });
   await loadRecords((x) => x.id === r.id);
+}
+
+// Skill records carry only their description in the list; the full SKILL.md is
+// fetched lazily on demand (and cached on the record).
+function ensureSkillContent(r) {
+  if (r.target_type !== "skill" || r.skill_content !== undefined) return Promise.resolve();
+  r.skill_content = null; // sentinel: loading
+  return api.get("/records/" + encodeURIComponent(r.id))
+    .then((d) => { r.skill_content = (d && d.skill_content) || ""; })
+    .catch(() => { r.skill_content = ""; });
+}
+
+async function doSkillEdit(r, newContent, oldContent) {
+  if (newContent === oldContent) { S.mode = null; renderDetail(); return; }
+  await api.post("/records/edit", { target_type: "skill", target_key: r.target_key, new_value: newContent });
+  await loadRecords((x) => x.target_type === "skill" && x.target_key === r.target_key);
+  pushToast({
+    tone: "human", text: "已更新 SKILL.md 內容",
+    onUndo: async () => {
+      await api.post("/records/edit", { target_type: "skill", target_key: r.target_key, new_value: oldContent }).catch(() => {});
+      await loadRecords((x) => x.target_type === "skill" && x.target_key === r.target_key);
+    },
+  });
 }
 
 // ───────────────────────── atoms ─────────────────────────
@@ -379,6 +403,10 @@ function renderDetail() {
       el("div", { style: { fontSize: "13px" } }, "從左側選一筆沉澱，看它從哪來、怎麼長成的")));
     return;
   }
+  // lazily load full SKILL.md so the detail can show + edit the whole content
+  if (r.target_type === "skill" && r.skill_content === undefined) {
+    ensureSkillContent(r).then(() => { if (selected() === r) renderDetail(); });
+  }
   const val = activeValue(r);
   host.append(el("div", { style: { padding: "18px 26px 15px", borderBottom: "1px solid var(--border)", background: "var(--surface)" } },
     detailMetaRow(r),
@@ -439,15 +467,16 @@ function actionMenu(r) {
   return menu;
 }
 
-function enterEdit(r) {
+async function enterEdit(r) {
+  if (r.target_type === "skill") await ensureSkillContent(r);  // edit the full SKILL.md
   S.mode = "edit";
-  S.draft = r.target_type === "skill" && r.skill_content ? r.skill_content : activeValue(r);
+  S.draft = (r.target_type === "skill" && r.skill_content != null) ? r.skill_content : activeValue(r);
   renderDetail();
-  if (D.editTa) { D.editTa.focus(); D.editTa.setSelectionRange(D.editTa.value.length, D.editTa.value.length); }
+  if (D.editTa) { D.editTa.focus(); D.editTa.setSelectionRange(0, 0); }
 }
 function editor(r, val) {
   const isSkill = r.target_type === "skill";
-  const base = isSkill && r.skill_content ? r.skill_content : val;
+  const base = (isSkill && r.skill_content != null) ? r.skill_content : val;
   const ta = el("textarea", {
     class: "loom-edit" + (isSkill ? " sm" : ""), rows: isSkill ? 16 : 2,
     oninput: () => { S.draft = ta.value; refreshDiff(); },
@@ -459,31 +488,47 @@ function editor(r, val) {
   ta.value = S.draft; D.editTa = ta;
   const diffBox = el("div", { style: { marginTop: "5px", padding: "8px 11px", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-2)", fontSize: "13px", minHeight: "20px", maxHeight: "180px", overflow: "auto" } });
   D.diffBox = diffBox; D.diffBase = base;
+  const saveLabel = isSkill ? "儲存 SKILL.md" : "存成新版本";
+  const hint = isSkill
+    ? "會寫回 SKILL.md（先自動備份） · <span class='loom-kbd'>⌘↵</span>"
+    : "會新增 v" + (r.versions.length + 1) + "，自動版仍保留 · <span class='loom-kbd'>⌘↵</span>";
   const wrap = el("div", {},
     ta,
     el("div", { style: { marginTop: "9px", fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "7px" } },
       icon("pencil", { s: 11, color: "var(--human)" }), "即時預覽改動："),
     diffBox,
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "11px" } },
-      el("button", { class: "loom-btn primary", onclick: () => commitEdit(r, base) }, icon("check", { s: 13 }), "存成新版本"),
+      el("button", { class: "loom-btn primary", onclick: () => commitEdit(r, base) }, icon("check", { s: 13 }), saveLabel),
       el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消"),
       el("div", { style: { flex: "1" } }),
-      el("span", { class: "loom-meta", html: "會新增 v" + (r.versions.length + 1) + "，自動版仍保留 · <span class='loom-kbd'>⌘↵</span>" })));
+      el("span", { class: "loom-meta", html: hint })));
   setTimeout(refreshDiff, 0);
   return wrap;
 }
 function refreshDiff() {
   if (!D.diffBox) return;
-  const base = D.diffBase, draft = (S.draft || "");
-  D.diffBox.replaceChildren(
-    draft.trim() === base
-      ? el("span", { style: { color: "var(--text-4)", fontFamily: "IBM Plex Mono, monospace" } }, "尚未改動")
-      : diffEl(base, draft));
+  const base = D.diffBase || "", draft = (S.draft || "");
+  if (draft === base) {
+    D.diffBox.replaceChildren(el("span", { style: { color: "var(--text-4)", fontFamily: "IBM Plex Mono, monospace" } }, "尚未改動"));
+    return;
+  }
+  if (base.length > DIFF_MAX || draft.length > DIFF_MAX) {
+    const delta = draft.length - base.length;
+    D.diffBox.replaceChildren(el("span", { style: { color: "var(--text-3)", fontFamily: "IBM Plex Mono, monospace" } },
+      `內容較長，略過即時字元 diff（${draft.length} 字，${delta >= 0 ? "+" : ""}${delta}）`));
+    return;
+  }
+  D.diffBox.replaceChildren(diffEl(base, draft));
 }
 function commitEdit(r, base) {
-  const v = (S.draft || "").trim();
   S.mode = null;
-  if (v && v !== base) doEdit(r, v); else renderDetail();
+  if (r.target_type === "skill") {
+    const v = S.draft || "";   // preserve formatting (no trim) for SKILL.md
+    if (v && v !== base) doSkillEdit(r, v, base); else renderDetail();
+  } else {
+    const v = (S.draft || "").trim();
+    if (v && v !== base) doEdit(r, v); else renderDetail();
+  }
 }
 
 function enterAnno(r) {
@@ -547,19 +592,31 @@ function pipeline(r) {
       el("span", { style: { color: "var(--text-4)" } }, "·"),
       el("span", { class: "loom-meta" }, "Hermes 從這段沉澱為 " + catLabel(r.cat))));
 
-  // ── Section B — Hermes 沉澱的內容 (value + version history when edited) ──
-  const storedContent = prev
-    ? el("div", {},
-        el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html: "從 <span class='loom-mono'>" + prev.v + "</span> → <span class='loom-mono'>" + stored.v + "</span> 的變化：" }),
-        el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px" } }, diffEl(prev.value, stored.value)))
-    : el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 13px", background: "var(--surface)", fontSize: "14px", color: "var(--text)", lineHeight: "1.5" } }, stored.value);
-
-  const sectionB = el("div", {},
-    sectionHead("spark", edited ? "Hermes 沉澱的內容 · 含你的調整" : "Hermes 沉澱的內容"),
-    storedContent,
-    edited && el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
-      el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, "版本歷史 · " + vs.length + " 版 · Hermes 的自動版本永遠保留"),
-      ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
+  // ── Section B — Hermes 沉澱的內容 ──
+  let sectionB;
+  if (r.target_type === "skill") {
+    // skills: show the full SKILL.md (lazily loaded), editable via 編輯內容
+    const c = r.skill_content;
+    const body = c == null
+      ? el("div", { class: "loom-meta" }, "載入 SKILL.md 內容中…")
+      : el("pre", { style: { margin: "0", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px 14px", background: "var(--surface)", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "460px", overflow: "auto" } }, c || "（此 skill 沒有內容）");
+    sectionB = el("div", {},
+      sectionHead("spark", "Hermes 沉澱的內容（SKILL.md）",
+        el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => enterEdit(r) }, icon("pencil", { s: 11 }), "編輯內容")),
+      body);
+  } else {
+    const storedContent = prev
+      ? el("div", {},
+          el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html: "從 <span class='loom-mono'>" + prev.v + "</span> → <span class='loom-mono'>" + stored.v + "</span> 的變化：" }),
+          el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px" } }, diffEl(prev.value, stored.value)))
+      : el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 13px", background: "var(--surface)", fontSize: "14px", color: "var(--text)", lineHeight: "1.5" } }, stored.value);
+    sectionB = el("div", {},
+      sectionHead("spark", edited ? "Hermes 沉澱的內容 · 含你的調整" : "Hermes 沉澱的內容"),
+      storedContent,
+      edited && el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
+        el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, "版本歷史 · " + vs.length + " 版 · Hermes 的自動版本永遠保留"),
+        ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
+  }
 
   return el("div", { style: { display: "flex", flexDirection: "column", gap: "22px" } }, sectionA, sectionB);
 }

@@ -97,6 +97,19 @@ class TestRecords(LoomTestCase):
         self.assertEqual(d["annotation"]["text"], "只在工作情境適用")
         self.assertTrue(d["pinned"])
 
+    def test_skill_detail_has_full_content_and_edit_rewrites_file(self):
+        self.write_memory("user", "x")
+        skill_md = self.write_skill("productivity", "demo",
+                                    "---\nname: demo\ncreated_by: agent\n---\n# Demo\noriginal body\n")
+        led = self.ledger()
+        d = service.record_detail(led, "skill:demo")
+        self.assertIn("skill_content", d)
+        self.assertIn("original body", d["skill_content"])
+        self.assertTrue(d["is_agent_created"])
+        new = d["skill_content"].replace("original body", "PATCHED body")
+        service.record_edit(led, "skill", "demo", new)
+        self.assertIn("PATCHED body", skill_md.read_text())
+
     def test_add_entry_for_delete_undo(self):
         led = self._seed()
         res = overrides.add_memory_entry(led, "user", "User drinks coffee too.")
