@@ -31,6 +31,28 @@ def llm_configured() -> bool:
     return bool(os.environ.get("LOOM_LLM_BASE_URL") and os.environ.get("LOOM_LLM_MODEL"))
 
 
+def diagnose(probe: bool = False) -> dict:
+    """Report whether the LLM endpoint is configured (no secrets exposed).
+
+    With ``probe=True`` it makes one real test call so you can see the actual
+    error when ``method`` keeps coming back "keyword" despite config.
+    """
+    out = {
+        "configured": llm_configured(),
+        "base_url": os.environ.get("LOOM_LLM_BASE_URL"),
+        "model": os.environ.get("LOOM_LLM_MODEL"),
+        "has_api_key": bool(os.environ.get("LOOM_LLM_API_KEY")),
+        "timeout": _TIMEOUT,
+    }
+    if probe and out["configured"]:
+        try:
+            picked = _resolve_llm("I'm planning dinner, any food notes?", ["food", "travel"])
+            out["probe"] = {"ok": True, "picked": picked}
+        except Exception as e:  # noqa: BLE001
+            out["probe"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+    return out
+
+
 def resolve_tags(message: str, tags: List[str]) -> Tuple[List[str], str]:
     """Return (matched_tags, method). method ∈ {"llm","keyword","none"}."""
     tags = [t for t in (tags or []) if t]

@@ -203,6 +203,13 @@ def h_recall(ledger, params, query, body):
     return 200, service.recall(ledger, msg, limit=int(body.get("limit", 8)))
 
 
+@route("GET", r"/api/llm-status")
+def h_llm_status(ledger, params, query, body):
+    from . import tagger
+    probe = (query.get("probe", ["0"])[0] in ("1", "true", "yes"))
+    return 200, tagger.diagnose(probe=probe)
+
+
 @route("POST", r"/api/records/pin")
 def h_record_pin(ledger, params, query, body):
     try:

@@ -409,7 +409,8 @@ def recall(ledger: Ledger, message: str, limit: int = 8) -> dict:
         return {"tags": [], "method": "none", "count": 0, "context": "", "records": []}
     matched, method = tagger.resolve_tags(message, all_tags)
     if not matched:
-        return {"tags": [], "method": method, "count": 0, "context": "", "records": []}
+        return {"tags": [], "method": method, "count": 0, "context": "", "records": [],
+                "llm_configured": tagger.llm_configured()}
     mset = {t.lower() for t in matched}
     hits = [r for r in recs if any(t.lower() in mset for t in r.get("tags", []))][:limit]
     lines = ["（Hermes Loom 依標籤「" + "、".join(matched) + "」帶入你先前記住的相關資訊）"]
@@ -418,6 +419,7 @@ def recall(ledger: Ledger, message: str, limit: int = 8) -> dict:
         lines.append("- " + (v if len(v) <= 300 else v[:300] + "…"))
     context = "\n".join(lines) if hits else ""
     return {"tags": matched, "method": method, "count": len(hits), "context": context,
+            "llm_configured": tagger.llm_configured(),
             "records": [{"id": r["id"], "value": _active_value(r), "tags": r["tags"]} for r in hits]}
 
 
