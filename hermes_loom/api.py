@@ -303,6 +303,9 @@ class LoomHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
+        # Never let the browser serve a stale app.js/css after a code update —
+        # this is a local dev tool, so always revalidate.
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
         self.end_headers()
         self.wfile.write(data)
 
