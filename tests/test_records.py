@@ -15,6 +15,20 @@ class TestRecords(LoomTestCase):
         obs.on_memory_write("add", "user", "User uses NixOS.", capture_window=False)
         return led
 
+    def test_only_three_categories(self):
+        led = self._seed()
+        out = service.build_records(led)
+        keys = sorted(c["k"] for c in out["cats"])
+        self.assertEqual(keys, ["memory", "pref", "skill"])
+
+    def test_legacy_category_coerced(self):
+        led = self._seed()
+        r = service.build_records(led)["records"][0]
+        # simulate a stale reclassify to a removed category
+        led.upsert_record_state(r["target_type"], r["target_key"], cat="fact")
+        d = service.record_detail(led, r["id"])
+        self.assertIn(d["cat"], ("memory", "pref", "skill"))
+
     def test_build_records_from_live_entries(self):
         led = self._seed()
         out = service.build_records(led)
@@ -51,13 +65,13 @@ class TestRecords(LoomTestCase):
         r = service.build_records(led)["records"][0]
         tt, tk = r["target_type"], r["target_key"]
         overrides.annotate_record(led, tt, tk, "只在工作情境適用")
-        overrides.reclassify_record(led, tt, tk, "fact", from_cat=r["cat"])
+        overrides.reclassify_record(led, tt, tk, "memory", from_cat=r["cat"])
         overrides.set_pin(led, tt, tk, True)
         d = service.record_detail(led, f"{tt}:{tk}")
         self.assertEqual(d["annotation"]["text"], "只在工作情境適用")
-        self.assertEqual(d["cat"], "fact")
+        self.assertEqual(d["cat"], "memory")
         self.assertTrue(d["pinned"])
-        self.assertEqual(d["reclassified"]["to"], "fact")
+        self.assertEqual(d["reclassified"]["to"], "memory")
 
     def test_add_entry_for_delete_undo(self):
         led = self._seed()

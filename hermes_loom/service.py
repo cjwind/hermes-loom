@@ -248,6 +248,8 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
 
     hint = origin["source_hint"] if origin else None
     cat = st.get("cat") or _CAT_DEFAULT.get(target_type, "memory")
+    if cat not in _CAT_LABELS:   # coerce any legacy category (e.g. fact/struct)
+        cat = _CAT_DEFAULT.get(target_type, "memory")
     sess = (origin or {}).get("source_session_id")
     rec = {
         "id": f"{target_type}:{key}",
@@ -278,7 +280,10 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
     return rec
 
 
-_CAT_LABELS = {"memory": "記憶", "skill": "技能", "pref": "偏好", "fact": "事實", "struct": "結構"}
+# Loom uses three categories only: 記憶 / 技能 / 偏好. (Hermes has no categories;
+# these are a Loom-side organizational layer. memory store → 記憶, user store →
+# 偏好, skills → 技能; the user can reclassify among these three.)
+_CAT_LABELS = {"memory": "記憶", "skill": "技能", "pref": "偏好"}
 
 
 def _cat_label(k: str) -> str:
