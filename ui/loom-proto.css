@@ -1,0 +1,86 @@
+/* Hermes Loom — prototype-only component styles (loaded after loom-theme.css) */
+
+/* inline char-level diff */
+.di { font-family: "IBM Plex Mono", monospace; line-height: 1.7; }
+.di-del { background: var(--del-soft); color: color-mix(in oklch, var(--del) 78%, var(--text));
+  text-decoration: line-through; text-decoration-color: color-mix(in oklch, var(--del) 50%, transparent);
+  border-radius: 3px; padding: 0 1px; }
+.di-add { background: var(--add-soft); color: color-mix(in oklch, var(--add) 72%, var(--text));
+  border-radius: 3px; padding: 0 1px; }
+.di-eq  { color: var(--text-2); }
+
+/* editor */
+.loom-edit {
+  width: 100%; border: 1px solid var(--accent-line); border-radius: var(--r2);
+  background: var(--surface); color: var(--text); font-family: inherit; font-size: 15px;
+  line-height: 1.5; padding: 10px 12px; resize: none; outline: none;
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.loom-edit.sm { font-size: 13px; }
+.loom-edit::placeholder { color: var(--text-4); }
+
+/* dropdown menus */
+.loom-menu {
+  position: absolute; z-index: 60; min-width: 180px; padding: 5px;
+  background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+}
+.loom-mi {
+  display: flex; align-items: center; gap: 9px; width: 100%; text-align: left;
+  height: 32px; padding: 0 9px; border-radius: var(--r2); border: none; background: transparent;
+  color: var(--text); font-family: inherit; font-size: 12.5px; cursor: pointer;
+}
+.loom-mi:hover { background: var(--surface-3); }
+.loom-mi.danger { color: var(--del); }
+.loom-mi .ck { margin-left: auto; color: var(--accent); display: flex; }
+
+/* annotation block */
+.loom-anno {
+  border: 1px dashed color-mix(in oklch, var(--human) 45%, var(--border));
+  background: color-mix(in oklch, var(--human-soft) 60%, var(--surface));
+  border-radius: var(--r); padding: 11px 13px;
+}
+.loom-anno .hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em;
+  color: var(--human); font-family: "IBM Plex Mono", monospace; margin-bottom: 5px;
+  display: flex; align-items: center; gap: 6px; }
+
+/* toast */
+.loom-toasts { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+  z-index: 300; display: flex; flex-direction: column; gap: 9px; align-items: center; }
+.loom-toast {
+  display: flex; align-items: center; gap: 13px; height: 42px; padding: 0 8px 0 15px;
+  background: var(--surface); border: 1px solid var(--border-2); border-radius: 11px;
+  box-shadow: var(--shadow-lg); font-size: 12.5px; color: var(--text);
+  animation: loom-rise .26s cubic-bezier(.2,.8,.2,1);
+}
+@keyframes loom-rise { from { opacity: 0; transform: translateY(10px); } }
+.loom-toast .ic { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center;
+  justify-content: center; flex: 0 0 auto; }
+.loom-toast .undo { height: 28px; padding: 0 11px; border-radius: 7px; border: 1px solid var(--border-2);
+  background: var(--surface-2); color: var(--accent-ink); font-weight: 600; font-size: 12px;
+  font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+.loom-toast .undo:hover { background: var(--surface-3); }
+
+/* selection state on list rows handled inline; hover */
+.loom-lrow:hover { background: var(--surface-2); }
+
+/* empty pane */
+.loom-empty { height: 100%; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 12px; color: var(--text-3); }
+
+/* deleted veil within stored stage not needed */
+
+/* small kbd */
+.loom-kbd { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--text-4);
+  border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; background: var(--surface-2); }
+
+/* annotate/reclassify composer */
+.loom-composer { border: 1px solid var(--border-2); border-radius: var(--r); background: var(--surface-2);
+  padding: 12px; }
+
+/* tweak panel host already styled by starter; nothing here */
+
+/* focus ring for inputs */
+.loom-input { height: 30px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--surface);
+  color: var(--text); font-family: inherit; font-size: 12.5px; padding: 0 10px; outline: none; width: 100%; }
+.loom-input:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }

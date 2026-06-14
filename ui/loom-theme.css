@@ -1,0 +1,193 @@
+/* Hermes Loom — visual language. Cool neutral grays + one cool accent.
+   Light + dark via body.dark. All component classes prefixed .loom- */
+
+:root {
+  --bg:        oklch(0.985 0.003 250);
+  --surface:   oklch(1 0 0);
+  --surface-2: oklch(0.975 0.004 250);
+  --surface-3: oklch(0.955 0.006 250);
+  --inset:     oklch(0.965 0.005 250);
+  --border:    oklch(0.915 0.006 255);
+  --border-2:  oklch(0.86 0.008 255);
+  --text:      oklch(0.28 0.013 262);
+  --text-2:    oklch(0.5 0.013 262);
+  --text-3:    oklch(0.63 0.011 262);
+  --text-4:    oklch(0.72 0.009 262);
+  --accent:    oklch(0.56 0.135 244);
+  --accent-2:  oklch(0.62 0.085 210);
+  --accent-ink: oklch(0.42 0.13 248);
+  --accent-soft: oklch(0.95 0.028 244);
+  --accent-line: oklch(0.8 0.07 244);
+  --cat-memory: oklch(0.56 0.135 244);
+  --cat-skill:  oklch(0.58 0.09 196);
+  --cat-pref:   oklch(0.55 0.1 282);
+  --cat-fact:   oklch(0.6 0.1 158);
+  --cat-struct: oklch(0.62 0.012 262);
+  --human:     oklch(0.58 0.14 64);
+  --human-soft: oklch(0.95 0.04 70);
+  --add:       oklch(0.58 0.1 158);
+  --add-soft:  oklch(0.95 0.05 158);
+  --del:       oklch(0.58 0.14 28);
+  --del-soft:  oklch(0.95 0.04 30);
+  --shadow:    0 1px 2px rgba(20,28,45,.05), 0 2px 8px rgba(20,28,45,.05);
+  --shadow-lg: 0 4px 12px rgba(20,28,45,.08), 0 12px 32px rgba(20,28,45,.08);
+  --r:  10px;
+  --r2: 7px;
+}
+
+body.dark {
+  --bg:        oklch(0.165 0.008 262);
+  --surface:   oklch(0.205 0.01 262);
+  --surface-2: oklch(0.235 0.011 262);
+  --surface-3: oklch(0.27 0.012 262);
+  --inset:     oklch(0.185 0.009 262);
+  --border:    oklch(0.295 0.012 264);
+  --border-2:  oklch(0.37 0.014 264);
+  --text:      oklch(0.94 0.005 250);
+  --text-2:    oklch(0.72 0.011 255);
+  --text-3:    oklch(0.58 0.012 258);
+  --text-4:    oklch(0.48 0.012 260);
+  --accent:    oklch(0.72 0.13 240);
+  --accent-2:  oklch(0.75 0.1 205);
+  --accent-ink: oklch(0.82 0.1 238);
+  --accent-soft: oklch(0.3 0.06 244);
+  --accent-line: oklch(0.45 0.09 244);
+  --cat-memory: oklch(0.72 0.13 240);
+  --cat-skill:  oklch(0.72 0.1 198);
+  --cat-pref:   oklch(0.72 0.11 284);
+  --cat-fact:   oklch(0.74 0.11 160);
+  --cat-struct: oklch(0.6 0.012 262);
+  --human:     oklch(0.76 0.13 66);
+  --human-soft: oklch(0.32 0.06 64);
+  --add:       oklch(0.72 0.11 160);
+  --add-soft:  oklch(0.3 0.06 158);
+  --del:       oklch(0.72 0.13 30);
+  --del-soft:  oklch(0.32 0.06 28);
+  --shadow:    0 1px 2px rgba(0,0,0,.3), 0 2px 8px rgba(0,0,0,.25);
+  --shadow-lg: 0 6px 16px rgba(0,0,0,.4), 0 16px 40px rgba(0,0,0,.35);
+}
+
+/* canvas backdrop follows the theme for a coherent dark experience */
+body.dark .design-canvas { background: oklch(0.13 0.008 262) !important; }
+
+.loom-app, .loom-app * { box-sizing: border-box; }
+.loom-app {
+  width: 100%; height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.loom-mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-feature-settings: "tnum"; }
+
+/* ── top bar ─────────────────────────────────────────── */
+.loom-top {
+  height: 52px; flex: 0 0 52px;
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.loom-brand { display: flex; align-items: center; gap: 9px; }
+.loom-logo {
+  width: 22px; height: 22px; border-radius: 6px; flex: 0 0 auto;
+  background: linear-gradient(150deg, var(--accent), var(--accent-2));
+  position: relative; overflow: hidden;
+}
+.loom-logo::before, .loom-logo::after {
+  content: ""; position: absolute; left: 4px; right: 4px; height: 1.5px;
+  background: rgba(255,255,255,.85); border-radius: 2px;
+}
+.loom-logo::before { top: 8px; }
+.loom-logo::after { top: 13px; }
+.loom-name { font-weight: 600; font-size: 14px; letter-spacing: -0.2px; }
+.loom-name .sub { color: var(--text-3); font-weight: 500; }
+.loom-top-spacer { flex: 1; }
+.loom-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 26px; padding: 0 10px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface-2);
+  font-size: 11.5px; color: var(--text-2); font-weight: 500;
+}
+.loom-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 auto; }
+.loom-live { background: var(--cat-fact); box-shadow: 0 0 0 3px color-mix(in oklch, var(--cat-fact) 22%, transparent); }
+.loom-iconbtn {
+  width: 28px; height: 28px; border-radius: 7px; border: 1px solid transparent;
+  background: transparent; color: var(--text-3); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+.loom-iconbtn:hover { background: var(--surface-3); color: var(--text); }
+
+/* ── generic chrome ──────────────────────────────────── */
+.loom-tabs { display: flex; gap: 2px; }
+.loom-tab {
+  height: 30px; padding: 0 12px; border-radius: 7px;
+  font-size: 12.5px; font-weight: 500; color: var(--text-3);
+  display: flex; align-items: center; gap: 7px; cursor: pointer; border: none; background: transparent;
+}
+.loom-tab.on { background: var(--surface-3); color: var(--text); }
+.loom-search {
+  height: 30px; flex: 1; max-width: 280px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+  display: flex; align-items: center; gap: 7px; padding: 0 10px; color: var(--text-4); font-size: 12.5px;
+}
+.loom-btn {
+  height: 30px; padding: 0 12px; border-radius: 8px; cursor: pointer;
+  font-family: inherit; font-size: 12.5px; font-weight: 500;
+  display: inline-flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border-2); background: var(--surface); color: var(--text);
+}
+.loom-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.loom-btn.ghost { border-color: transparent; background: transparent; color: var(--text-2); }
+.loom-btn.danger { color: var(--del); border-color: color-mix(in oklch, var(--del) 35%, var(--border)); }
+
+/* ── category + status atoms ─────────────────────────── */
+.loom-cat { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600;
+  letter-spacing: .02em; color: var(--text-2); }
+.loom-cat .cd { width: 7px; height: 7px; border-radius: 2px; flex: 0 0 auto; }
+.cat-memory .cd { background: var(--cat-memory); } .cat-memory { color: var(--cat-memory); }
+.cat-skill  .cd { background: var(--cat-skill); }  .cat-skill  { color: var(--cat-skill); }
+.cat-pref   .cd { background: var(--cat-pref); }   .cat-pref   { color: var(--cat-pref); }
+.cat-fact   .cd { background: var(--cat-fact); }   .cat-fact   { color: var(--cat-fact); }
+.cat-struct .cd { background: var(--cat-struct); border-radius: 50%; } .cat-struct { color: var(--cat-struct); }
+
+.loom-tag {
+  display: inline-flex; align-items: center; gap: 5px; height: 19px; padding: 0 7px;
+  border-radius: 5px; font-size: 10.5px; font-weight: 600; letter-spacing: .02em;
+  font-family: "IBM Plex Mono", monospace;
+}
+.tag-auto  { background: var(--surface-3); color: var(--text-3); }
+.tag-human { background: var(--human-soft); color: var(--human); }
+.tag-src   { background: var(--surface-2); color: var(--text-2); border: 1px solid var(--border); cursor: pointer; }
+.tag-src:hover { border-color: var(--accent-line); color: var(--accent-ink); }
+
+.loom-meta { font-size: 11.5px; color: var(--text-3); font-family: "IBM Plex Mono", monospace; }
+.loom-divider { height: 1px; background: var(--border); border: 0; margin: 0; }
+
+/* freshness / confidence meter */
+.loom-conf { display: inline-flex; gap: 2px; align-items: center; }
+.loom-conf i { width: 3px; height: 9px; border-radius: 1px; background: var(--border-2); display: block; }
+.loom-conf i.on { background: var(--accent); }
+
+/* provenance quote-back */
+.loom-quote {
+  border-left: 2px solid var(--accent-line); padding: 8px 12px; border-radius: 0 8px 8px 0;
+  background: var(--surface-2); font-size: 12.5px; color: var(--text-2); line-height: 1.55;
+}
+.loom-quote .who { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: .04em; display: block; margin-bottom: 3px; }
+.loom-quote em { font-style: normal; background: color-mix(in oklch, var(--accent) 16%, transparent);
+  color: var(--text); border-radius: 3px; padding: 0 2px; box-decoration-break: clone; }
+
+/* diff lines */
+.loom-diff { font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.7; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.loom-diff div { padding: 2px 10px; display: flex; gap: 8px; }
+.loom-diff .del { background: var(--del-soft); color: color-mix(in oklch, var(--del) 75%, var(--text)); }
+.loom-diff .add { background: var(--add-soft); color: color-mix(in oklch, var(--add) 70%, var(--text)); }
+.loom-diff .mk { width: 10px; flex: 0 0 auto; opacity: .7; }
+
+::selection { background: color-mix(in oklch, var(--accent) 28%, transparent); }

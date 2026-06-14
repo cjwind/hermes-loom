@@ -109,6 +109,22 @@ CREATE TABLE IF NOT EXISTS loom_meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Per-record UI/tuning state for the Inspector: pin, reclassify, annotation.
+-- Keyed by (target_type, target_key). Best-effort: memory keys are content
+-- hashes, so pins/notes are re-anchored on the new key after an edit.
+CREATE TABLE IF NOT EXISTS record_state (
+    target_type TEXT NOT NULL,
+    target_key TEXT NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0,
+    cat TEXT,                       -- reclassified category override
+    annotation TEXT,
+    annotation_at REAL,
+    reclass_from TEXT,
+    reclass_to TEXT,
+    reclass_at REAL,
+    PRIMARY KEY (target_type, target_key)
+);
 """
 
 
@@ -342,6 +358,41 @@ class Ledger:
             (target_type, target_key),
         ).fetchall()
         return [dict(r) for r in rows]
+
+    # -- per-record UI state (pin / reclassify / annotation) -----------------
+    def get_record_state(self, target_type: str, target_key: str) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM record_state WHERE target_type=? AND target_key=?",
+            (target_type, target_key),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def upsert_record_state(self, target_type: str, target_key: str, **fields) -> None:
+        cols = ["pinned", "cat", "annotation", "annotation_at",
+                "reclass_from", "reclass_to", "reclass_at"]
+        cur = self.get_record_state(target_type, target_key) or {}
+        merged = {c: cur.get(c) for c in cols}
+        merged.update({k: v for k, v in fields.items() if k in cols})
+        with self._lock:
+            self.conn.execute(
+                """INSERT INTO record_state
+                   (target_type,target_key,pinned,cat,annotation,annotation_at,
+                    reclass_from,reclass_to,reclass_at)
+                   VALUES(?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(target_type,target_key) DO UPDATE SET
+                     pinned=excluded.pinned, cat=excluded.cat,
+                     annotation=excluded.annotation, annotation_at=excluded.annotation_at,
+                     reclass_from=excluded.reclass_from, reclass_to=excluded.reclass_to,
+                     reclass_at=excluded.reclass_at""",
+                (target_type, target_key, int(merged.get("pinned") or 0),
+                 merged.get("cat"), merged.get("annotation"), merged.get("annotation_at"),
+                 merged.get("reclass_from"), merged.get("reclass_to"), merged.get("reclass_at")),
+            )
+            self.conn.commit()
+
+    def all_record_states(self) -> dict:
+        rows = self.conn.execute("SELECT * FROM record_state").fetchall()
+        return {(r["target_type"], r["target_key"]): dict(r) for r in rows}
 
 
 def _row_to_event(row: sqlite3.Row) -> dict:

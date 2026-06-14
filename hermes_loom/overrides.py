@@ -75,27 +75,74 @@ def edit_memory_entry(
     ledger.add_memory_snapshot(store_type, content, _sha(content))
     backup = _backup_file(path)
 
+    new_text = new_text.strip()
     try:
-        target["text"] = new_text.strip()
+        target["text"] = new_text
+        _atomic_write(path, serialize_entries(entries))
+    except OSError as e:
+        raise OverrideError(f"failed to write {path}: {e}") from e
+
+    # Key the override/event by the NEW content's key so the rebuilt record
+    # (addressed by current content hash) can find its own edit history.
+    from .memory_parser import entry_key as _ekey
+    new_key = _ekey(new_text)
+    target_type = "user" if store_type == "user" else "memory"
+    ledger.add_override(
+        target_type=target_type, target_key=new_key, override_type="edit",
+        before_text=before, after_text=new_text, reason=reason, applied_by=applied_by,
+    )
+    event_id = ledger.add_event(
+        kind="memory_replaced", target_type=target_type, action="manual_edit",
+        target_key=new_key, target_path=str(path),
+        before_text=before, after_text=new_text,
+        source_hint="manual_override", tool_name="loom",
+        status="edited", metadata={"manual": True, "backup": str(backup),
+                                   "reason": reason, "prev_key": entry_key},
+    )
+    new_content = path.read_text(encoding="utf-8")
+    ledger.add_memory_snapshot(store_type, new_content, _sha(new_content), source_event_id=event_id)
+    return {"event_id": event_id, "key": new_key, "before": before,
+            "after": new_text, "backup": str(backup)}
+
+
+def add_memory_entry(
+    ledger: Ledger, store_type: str, text: str,
+    *, reason: Optional[str] = None, applied_by: str = "loom-ui",
+) -> dict:
+    """Append a new entry (used to undo a delete). Creates the file if absent."""
+    text = (text or "").strip()
+    if not text:
+        raise OverrideError("entry text is empty")
+    path = _memory_path(store_type)
+    content = path.read_text(encoding="utf-8") if path.exists() else ""
+    if content:
+        ledger.add_memory_snapshot(store_type, content, _sha(content))
+        backup = str(_backup_file(path))
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        backup = None
+    entries = parse_entries(content)
+    from .memory_parser import entry_key
+    new_key = entry_key(text)
+    if any(e["key"] == new_key for e in entries):
+        raise OverrideError("an identical entry already exists")
+    entries.append({"key": new_key, "text": text})
+    try:
         _atomic_write(path, serialize_entries(entries))
     except OSError as e:
         raise OverrideError(f"failed to write {path}: {e}") from e
 
     target_type = "user" if store_type == "user" else "memory"
-    ledger.add_override(
-        target_type=target_type, target_key=entry_key, override_type="edit",
-        before_text=before, after_text=new_text.strip(), reason=reason, applied_by=applied_by,
-    )
+    ledger.add_override(target_type=target_type, target_key=new_key, override_type="edit",
+                        before_text=None, after_text=text, reason=reason, applied_by=applied_by)
     event_id = ledger.add_event(
-        kind="memory_replaced", target_type=target_type, action="manual_edit",
-        target_key=entry_key, target_path=str(path),
-        before_text=before, after_text=new_text.strip(),
-        source_hint="manual_override", tool_name="loom",
-        status="edited", metadata={"manual": True, "backup": str(backup), "reason": reason},
-    )
+        kind="memory_added", target_type=target_type, action="manual_add",
+        target_key=new_key, target_path=str(path), after_text=text,
+        source_hint="manual_override", tool_name="loom", status="edited",
+        metadata={"manual": True, "backup": backup, "reason": reason})
     new_content = path.read_text(encoding="utf-8")
     ledger.add_memory_snapshot(store_type, new_content, _sha(new_content), source_event_id=event_id)
-    return {"event_id": event_id, "before": before, "after": new_text.strip(), "backup": str(backup)}
+    return {"event_id": event_id, "key": new_key, "after": text, "backup": backup}
 
 
 def delete_memory_entry(
@@ -173,6 +220,46 @@ def edit_skill(
     )
     ledger.add_skill_snapshot(skill_name, str(path), new_content, _sha(new_content), source_event_id=event_id)
     return {"event_id": event_id, "backup": str(backup)}
+
+
+def annotate_record(ledger: Ledger, target_type: str, target_key: str,
+                    text: str, *, applied_by: str = "loom-ui") -> dict:
+    """Attach (or clear, if empty) a private note to a record.
+
+    Annotations are Loom-side only — they never touch Hermes' files (per design:
+    "不會改動沉澱內容"). Recorded in record_state + manual_overrides.
+    """
+    prev = (ledger.get_record_state(target_type, target_key) or {}).get("annotation")
+    text = (text or "").strip()
+    ledger.upsert_record_state(target_type, target_key,
+                               annotation=text or None, annotation_at=time.time())
+    ledger.add_override(target_type=target_type, target_key=target_key,
+                        override_type="annotate", before_text=prev,
+                        after_text=text or None, reason=None, applied_by=applied_by)
+    return {"annotation": text or None}
+
+
+def reclassify_record(ledger: Ledger, target_type: str, target_key: str,
+                      to_cat: str, *, from_cat: str | None = None,
+                      applied_by: str = "loom-ui") -> dict:
+    """Move a record to a different Loom category.
+
+    Categories are a Loom-side organizational layer (Hermes itself has no
+    categories), so this updates record_state only, plus an override row.
+    """
+    ledger.upsert_record_state(target_type, target_key,
+                               cat=to_cat, reclass_from=from_cat,
+                               reclass_to=to_cat, reclass_at=time.time())
+    ledger.add_override(target_type=target_type, target_key=target_key,
+                        override_type="reclassify", before_text=from_cat,
+                        after_text=to_cat, reason=None, applied_by=applied_by)
+    return {"cat": to_cat, "from": from_cat}
+
+
+def set_pin(ledger: Ledger, target_type: str, target_key: str, pinned: bool) -> dict:
+    """Toggle a pin (immediate, no history — matches the design)."""
+    ledger.upsert_record_state(target_type, target_key, pinned=1 if pinned else 0)
+    return {"pinned": bool(pinned)}
 
 
 def delete_skill(

@@ -89,6 +89,100 @@ def h_memory(ledger, params, query, body):
     return 200, service.current_memory(ledger)
 
 
+# ---- Inspector records --------------------------------------------------
+
+@route("GET", r"/api/records")
+def h_records(ledger, params, query, body):
+    return 200, service.build_records(ledger)
+
+
+@route("GET", r"/api/records/(?P<rid>.+)")
+def h_record_detail(ledger, params, query, body):
+    from urllib.parse import unquote
+    detail = service.record_detail(ledger, unquote(params["rid"]))
+    if not detail:
+        return 404, {"error": "record not found"}
+    return 200, detail
+
+
+def _record_target(body):
+    tt = body.get("target_type")
+    tk = body.get("target_key")
+    if not tt or not tk:
+        # accept an id "type:key" as a convenience
+        rid = body.get("id", "")
+        tt, _, tk = rid.partition(":")
+    if not tt or not tk:
+        raise KeyError("target_type/target_key (or id) required")
+    return tt, tk
+
+
+@route("POST", r"/api/records/edit")
+def h_record_edit(ledger, params, query, body):
+    try:
+        tt, tk = _record_target(body)
+        res = service.record_edit(ledger, tt, tk, body["new_value"], reason=body.get("reason"))
+        return 200, {"ok": True, **res}
+    except (KeyError, OverrideError) as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("POST", r"/api/records/delete")
+def h_record_delete(ledger, params, query, body):
+    try:
+        tt, tk = _record_target(body)
+        res = service.record_delete(ledger, tt, tk, reason=body.get("reason"))
+        return 200, {"ok": True, **res}
+    except (KeyError, OverrideError) as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("POST", r"/api/records/add")
+def h_record_add(ledger, params, query, body):
+    """Append a memory/user entry (used to undo a delete)."""
+    try:
+        from . import overrides as _ov
+        store = body.get("store_type") or body.get("target_type") or "memory"
+        store = "user" if store == "user" else "memory"
+        res = _ov.add_memory_entry(ledger, store, body["text"], reason=body.get("reason"))
+        return 200, {"ok": True, **res}
+    except (KeyError, OverrideError) as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("POST", r"/api/records/annotate")
+def h_record_annotate(ledger, params, query, body):
+    try:
+        tt, tk = _record_target(body)
+        from . import overrides as _ov
+        res = _ov.annotate_record(ledger, tt, tk, body.get("text", ""))
+        return 200, {"ok": True, **res}
+    except KeyError as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("POST", r"/api/records/reclassify")
+def h_record_reclassify(ledger, params, query, body):
+    try:
+        tt, tk = _record_target(body)
+        from . import overrides as _ov
+        res = _ov.reclassify_record(ledger, tt, tk, body["to_cat"], from_cat=body.get("from_cat"))
+        return 200, {"ok": True, **res}
+    except KeyError as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("POST", r"/api/records/pin")
+def h_record_pin(ledger, params, query, body):
+    try:
+        tt, tk = _record_target(body)
+        from . import overrides as _ov
+        res = _ov.set_pin(ledger, tt, tk, bool(body.get("pinned", True)))
+        return 200, {"ok": True, **res}
+    except KeyError as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
 @route("GET", r"/api/skills")
 def h_skills(ledger, params, query, body):
     return 200, service.list_skills(ledger)

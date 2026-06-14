@@ -81,7 +81,7 @@ Three clearly-separated layers (never mixed):
                                      └──────────▲───────────┘
                                                 │ fetch()
                                      ┌──────────┴───────────┐
-                                     │  D. Minimal UI       │  vanilla JS SPA (no build step)
+                                     │  D. Inspector UI     │  vanilla JS, design CSS (no build)
                                      │  /ui/*               │
                                      └──────────────────────┘
 ```
@@ -92,8 +92,11 @@ Three clearly-separated layers (never mixed):
   events* (not just final state) + snapshots + overrides.
 * **C. Local API** (`hermes_loom/api.py`) — reads the ledger, the live memory/skill
   files and session metadata for the UI; applies overrides.
-* **D. UI** (`ui/`) — Recent Growth, Event Detail, Current Memory, Skills, Skill
-  Detail, Session Context Viewer.
+* **D. UI** (`ui/`) — the **檢視台 (Inspector)**: a single master–detail screen
+  (left list rail + right provenance pipeline) built to the Claude Design handoff.
+  Light/dark themes, character-level diff, version history, and inline
+  edit/delete/annotate/reclassify/pin with undo toasts. Vanilla JS, no build step;
+  reuses the design's authoritative `loom-theme.css` / `loom-proto.css`.
 
 ### The three provenance tiers
 
@@ -248,6 +251,14 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | GET | `/skills` | skills list + last-change info |
 | GET | `/skills/{name}` | one skill + its recent growth events |
 | GET | `/sessions/{id}/context` | simplified conversation context from state.db |
+| GET | `/records` | **Inspector**: live memory/user/skill entries aggregated into records (versions + provenance + Loom category) |
+| GET | `/records/{id}` | one record (`id` = `type:key`) with full provenance + skill content |
+| POST | `/records/edit` | `{target_type, target_key, new_value}` → new human version, writes the file |
+| POST | `/records/delete` | soft-delete (memory entry removed / skill disabled) |
+| POST | `/records/add` | `{store_type, text}` → append entry (used for delete-undo) |
+| POST | `/records/annotate` | `{target_type, target_key, text}` → private note (Loom-side only) |
+| POST | `/records/reclassify` | `{target_type, target_key, to_cat}` → Loom category override |
+| POST | `/records/pin` | `{target_type, target_key, pinned}` |
 | POST | `/overrides/memory/edit` | `{store_type, entry_key, new_text, reason?}` |
 | POST | `/overrides/memory/delete` | `{store_type, entry_key, reason?}` |
 | POST | `/overrides/skill/edit` | `{name, new_content, reason?}` |

@@ -25,8 +25,8 @@ class TestMemoryOverrides(LoomTestCase):
         self.assertNotIn("User likes tea.", new)
         self.assertIn("User uses NixOS.", new)  # other entry untouched
 
-        # ledger recorded override + event with before/after
-        ov = led.overrides_for_target("user", key)
+        # ledger recorded override + event with before/after (keyed by new content)
+        ov = led.overrides_for_target("user", res["key"])
         self.assertEqual(len(ov), 1)
         self.assertEqual(ov[0]["before_text"], "User likes tea.")
         ev = led.get_event(res["event_id"])
