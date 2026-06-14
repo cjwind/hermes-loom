@@ -152,9 +152,10 @@ function closeToast(id) { S.toasts = S.toasts.filter((t) => t.id !== id); render
 function renderToasts() {
   const host = D.toasts; host.replaceChildren();
   for (const t of S.toasts) {
-    const toneBg = t.tone === "del" ? "var(--del-soft)" : t.tone === "human" ? "var(--human-soft)" : "var(--accent-soft)";
-    const toneFg = t.tone === "del" ? "var(--del)" : t.tone === "human" ? "var(--human)" : "var(--accent-ink)";
-    const tIcon = t.tone === "del" ? "trash" : t.tone === "undo" ? "undo" : "check";
+    const isErr = t.tone === "err";
+    const toneBg = (t.tone === "del" || isErr) ? "var(--del-soft)" : t.tone === "human" ? "var(--human-soft)" : "var(--accent-soft)";
+    const toneFg = (t.tone === "del" || isErr) ? "var(--del)" : t.tone === "human" ? "var(--human)" : "var(--accent-ink)";
+    const tIcon = t.tone === "del" ? "trash" : isErr ? "x" : t.tone === "undo" ? "undo" : "check";
     host.append(el("div", { class: "loom-toast" },
       el("span", { class: "ic", style: { background: toneBg, color: toneFg } }, icon(tIcon, { s: 13 })),
       el("span", {}, t.text),
@@ -164,7 +165,16 @@ function renderToasts() {
 }
 
 // ───────────────────────── mutations ─────────────────────────
-async function doEdit(r, value, { restored } = {}) {
+// Surface any mutation failure (e.g. a stale server missing a route → 404) as a
+// visible error toast instead of silently doing nothing.
+function guard(fn) {
+  return async (...args) => {
+    try { return await fn(...args); }
+    catch (e) { pushToast({ tone: "err", text: "操作失敗：" + (e && e.message || e) }); }
+  };
+}
+
+const doEdit = guard(async function (r, value, { restored } = {}) {
   const prev = activeValue(r);
   if (!value || value === prev) return;
   await api.post("/records/edit", { target_type: r.target_type, target_key: r.target_key, new_value: value });
@@ -174,14 +184,14 @@ async function doEdit(r, value, { restored } = {}) {
     text: restored ? "已還原並設為生效（存成新版本）" : "已存成新版本，Hermes 的自動版本仍保留",
     onUndo: async () => { await api.post("/records/edit", { target_type: r.target_type, target_key: entryKeyOf(value, r), new_value: prev }).catch(() => {}); await loadRecords((x) => x.target_type === r.target_type && activeValue(x) === prev); },
   });
-}
+});
 // memory keys change after edit; for undo we look up the record by current value instead.
 function entryKeyOf(value, r) {
   const m = S.records.find((x) => x.target_type === r.target_type && activeValue(x) === value);
   return m ? m.target_key : r.target_key;
 }
 
-async function doDelete(r) {
+const doDelete = guard(async function (r) {
   const val = activeValue(r);
   await api.post("/records/delete", { target_type: r.target_type, target_key: r.target_key });
   const canUndo = r.target_type !== "skill";
@@ -194,9 +204,9 @@ async function doDelete(r) {
       await loadRecords((x) => x.target_type === r.target_type && activeValue(x) === val);
     } : undefined,
   });
-}
+});
 
-async function doAnnotate(r, text) {
+const doAnnotate = guard(async function (r, text) {
   const prev = r.annotation ? r.annotation.text : "";
   await api.post("/records/annotate", { target_type: r.target_type, target_key: r.target_key, text });
   await loadRecords((x) => x.id === r.id);
@@ -204,16 +214,16 @@ async function doAnnotate(r, text) {
     tone: "human", text: text.trim() ? "已加上你的註解" : "已移除註解",
     onUndo: async () => { await api.post("/records/annotate", { target_type: r.target_type, target_key: r.target_key, text: prev }).catch(() => {}); await loadRecords((x) => x.id === r.id); },
   });
-}
+});
 
-async function doPin(r) {
+const doPin = guard(async function (r) {
   await api.post("/records/pin", { target_type: r.target_type, target_key: r.target_key, pinned: !r.pinned });
   await loadRecords((x) => x.id === r.id);
-}
+});
 
 // Change category = physically move the entry between MEMORY.md / USER.md.
 const CAT_FILE = { memory: "MEMORY.md", pref: "USER.md" };
-async function doRecat(r, toCat) {
+const doRecat = guard(async function (r, toCat) {
   const fromCat = r.cat;
   S.mode = null;
   const res = await api.post("/records/recategorize",
@@ -228,7 +238,7 @@ async function doRecat(r, toCat) {
       await loadRecords((x) => x.id === r.id);
     },
   });
-}
+});
 
 // Skill records carry only their description in the list; the full SKILL.md is
 // fetched lazily on demand (and cached on the record).
@@ -240,7 +250,7 @@ function ensureSkillContent(r) {
     .catch(() => { r.skill_content = ""; });
 }
 
-async function doSkillEdit(r, newContent, oldContent) {
+const doSkillEdit = guard(async function (r, newContent, oldContent) {
   if (newContent === oldContent) { S.mode = null; renderDetail(); return; }
   await api.post("/records/edit", { target_type: "skill", target_key: r.target_key, new_value: newContent });
   await loadRecords((x) => x.target_type === "skill" && x.target_key === r.target_key);
@@ -251,7 +261,7 @@ async function doSkillEdit(r, newContent, oldContent) {
       await loadRecords((x) => x.target_type === "skill" && x.target_key === r.target_key);
     },
   });
-}
+});
 
 // ───────────────────────── atoms ─────────────────────────
 function catChip(cat) {
