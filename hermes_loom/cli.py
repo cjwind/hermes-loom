@@ -15,7 +15,7 @@ import argparse
 import logging
 import sys
 
-from . import api, ingest, snapshot
+from . import api, compiler, config, ingest, snapshot
 from .ledger import Ledger
 
 
@@ -60,6 +60,27 @@ def _cmd_status(args):
     led.close()
 
 
+def _cmd_compile(args):
+    from pathlib import Path
+    led = Ledger()
+    try:
+        as_of = compiler.parse_as_of(args.as_of)
+        if args.in_place:
+            res = compiler.compile_in_place(led, as_of=as_of)
+        else:
+            res = compiler.compile_to_dir(led, Path(args.out), as_of=as_of)
+    finally:
+        led.close()
+    print(f"compiled {res['files']} file(s) [{res['mode']}]")
+    if res["mode"] == "dir":
+        print(f"  -> {res['out_dir']}")
+    if res.get("backups"):
+        print(f"  backed up {len(res['backups'])} existing file(s) to {config.file_backup_dir()}")
+    if res["missing"]:
+        print(f"  missing (no snapshot): {len(res['missing'])} — {', '.join(res['missing'][:5])}"
+              + (" …" if len(res['missing']) > 5 else ""))
+
+
 def _cmd_serve(args):
     api.serve(host=args.host, port=args.port)
 
@@ -78,6 +99,12 @@ def main(argv=None):
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.set_defaults(fn=_cmd_serve)
+
+    cp = sub.add_parser("compile", help="rebuild MEMORY.md/USER.md/SKILL.md from the ledger snapshots")
+    cp.add_argument("--out", default="./loom-export", help="output dir (default; safe, never touches ~/.hermes)")
+    cp.add_argument("--in-place", action="store_true", help="overwrite the real Hermes files (backs up each first)")
+    cp.add_argument("--as-of", default=None, help="compile historical state: epoch or 'YYYY-MM-DD[ HH:MM]'")
+    cp.set_defaults(fn=_cmd_compile)
 
     args = p.parse_args(argv)
     args.fn(args)

@@ -150,6 +150,7 @@ python3 -m hermes_loom.cli status
 | `sync` | `bootstrap` + `ingest` + `reconcile` (full refresh) |
 | `serve [--host --port]` | Run the local API + UI |
 | `status` | Print event counts by kind |
+| `compile [--out DIR \| --in-place] [--as-of T]` | Rebuild MEMORY.md/USER.md/SKILL.md from ledger snapshots |
 
 ---
 
@@ -266,6 +267,29 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | POST | `/maintenance/reconcile` | run snapshot-diff now |
 
 ---
+
+## Compile / restore Hermes files from the ledger
+
+Because Loom stores **full-content** snapshots of every file (`memory_snapshots`,
+`skill_snapshots`), it can regenerate Hermes' files from its own DB — Loom doubles
+as a regenerable backup:
+
+```bash
+python3 -m hermes_loom compile                      # → ./loom-export/ (safe; never touches ~/.hermes)
+python3 -m hermes_loom compile --out /tmp/snap      # custom output dir
+python3 -m hermes_loom compile --as-of "2026-06-14 12:00"   # historical state
+python3 -m hermes_loom compile --in-place           # overwrite the real files (backs up each first)
+```
+
+Default is **dir output** (writes a `memories/` + `skills/` tree, never modifies
+`~/.hermes`). `--in-place` overwrites the live files, taking a timestamped backup
+of each into `LOOM_HOME/backups/` first. `--as-of` picks, per file, the newest
+snapshot at or before that time (epoch, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM`).
+
+Reconstruction is byte-exact for anything Loom has snapshotted. It is only as
+fresh as the last observation/sync, so run `hermes-loom sync` first to capture the
+latest live state. (Event-log replay is *not* used — snapshots are the exact,
+reliable source; see docs/ARCHITECTURE.md.)
 
 ## Manual tuning safety
 
