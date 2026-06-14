@@ -63,6 +63,25 @@ class TestCompiler(LoomTestCase):
         self.assertEqual(res["files"], 0)
         self.assertIn("USER.md", res["missing"])
 
+    def test_cli_compile_auto_syncs_to_latest(self):
+        from hermes_loom import cli, snapshot
+        self.write_memory("user", "old fact")
+        # bootstrap once, then Hermes changes the file without Loom observing
+        led = self.ledger(); snapshot.bootstrap(led)
+        self.write_memory("user", "old fact\n§\nbrand new fact")
+        out = Path(self.tmp.name) / "auto"
+        cli.main(["compile", "--out", str(out)])           # default → auto-sync
+        self.assertIn("brand new fact", (out / "memories" / "USER.md").read_text())
+
+    def test_cli_compile_no_sync_is_stale(self):
+        from hermes_loom import cli, snapshot
+        self.write_memory("user", "old fact")
+        led = self.ledger(); snapshot.bootstrap(led)
+        self.write_memory("user", "old fact\n§\nbrand new fact")
+        out = Path(self.tmp.name) / "nosync"
+        cli.main(["compile", "--out", str(out), "--no-sync"])
+        self.assertNotIn("brand new fact", (out / "memories" / "USER.md").read_text())
+
     def test_parse_as_of(self):
         self.assertIsNone(compiler.parse_as_of(None))
         self.assertEqual(compiler.parse_as_of("1500"), 1500.0)

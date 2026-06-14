@@ -279,17 +279,22 @@ python3 -m hermes_loom compile                      # → ./loom-export/ (safe; 
 python3 -m hermes_loom compile --out /tmp/snap      # custom output dir
 python3 -m hermes_loom compile --as-of "2026-06-14 12:00"   # historical state
 python3 -m hermes_loom compile --in-place           # overwrite the real files (backs up each first)
+python3 -m hermes_loom compile --no-sync            # skip the auto-refresh (use last snapshots as-is)
 ```
 
-Default is **dir output** (writes a `memories/` + `skills/` tree, never modifies
+**`compile` auto-syncs first by default** — it runs bootstrap + ingest + reconcile
+to refresh snapshots from the current live files, so the output always reflects
+the latest state (even changes Loom hadn't observed yet). The implicit sync is
+skipped when `--as-of` is given (you explicitly want a past state) or with
+`--no-sync`.
+
+Default output is a **dir** (`memories/` + `skills/` tree, never modifies
 `~/.hermes`). `--in-place` overwrites the live files, taking a timestamped backup
 of each into `LOOM_HOME/backups/` first. `--as-of` picks, per file, the newest
 snapshot at or before that time (epoch, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM`).
 
-Reconstruction is byte-exact for anything Loom has snapshotted. It is only as
-fresh as the last observation/sync, so run `hermes-loom sync` first to capture the
-latest live state. (Event-log replay is *not* used — snapshots are the exact,
-reliable source; see docs/ARCHITECTURE.md.)
+Reconstruction is byte-exact for anything Loom has snapshotted. (Event-log replay
+is *not* used — snapshots are the exact, reliable source; see docs/ARCHITECTURE.md.)
 
 ## Manual tuning safety
 

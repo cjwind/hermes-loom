@@ -65,6 +65,13 @@ def _cmd_compile(args):
     led = Ledger()
     try:
         as_of = compiler.parse_as_of(args.as_of)
+        # Refresh snapshots from the live files first so compile reflects the
+        # latest state. Skipped for historical (--as-of) compiles or --no-sync.
+        if not args.no_sync and as_of is None:
+            snapshot.bootstrap(led)
+            ingest.ingest_state_db(led)
+            snapshot.reconcile_all(led)
+            print("synced (refreshed snapshots from current Hermes files)")
         if args.in_place:
             res = compiler.compile_in_place(led, as_of=as_of)
         else:
@@ -104,6 +111,7 @@ def main(argv=None):
     cp.add_argument("--out", default="./loom-export", help="output dir (default; safe, never touches ~/.hermes)")
     cp.add_argument("--in-place", action="store_true", help="overwrite the real Hermes files (backs up each first)")
     cp.add_argument("--as-of", default=None, help="compile historical state: epoch or 'YYYY-MM-DD[ HH:MM]'")
+    cp.add_argument("--no-sync", action="store_true", help="skip the pre-compile sync (don't refresh snapshots first)")
     cp.set_defaults(fn=_cmd_compile)
 
     args = p.parse_args(argv)
