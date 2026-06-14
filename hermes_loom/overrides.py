@@ -239,23 +239,6 @@ def annotate_record(ledger: Ledger, target_type: str, target_key: str,
     return {"annotation": text or None}
 
 
-def reclassify_record(ledger: Ledger, target_type: str, target_key: str,
-                      to_cat: str, *, from_cat: str | None = None,
-                      applied_by: str = "loom-ui") -> dict:
-    """Move a record to a different Loom category.
-
-    Categories are a Loom-side organizational layer (Hermes itself has no
-    categories), so this updates record_state only, plus an override row.
-    """
-    ledger.upsert_record_state(target_type, target_key,
-                               cat=to_cat, reclass_from=from_cat,
-                               reclass_to=to_cat, reclass_at=time.time())
-    ledger.add_override(target_type=target_type, target_key=target_key,
-                        override_type="reclassify", before_text=from_cat,
-                        after_text=to_cat, reason=None, applied_by=applied_by)
-    return {"cat": to_cat, "from": from_cat}
-
-
 def set_pin(ledger: Ledger, target_type: str, target_key: str, pinned: bool) -> dict:
     """Toggle a pin (immediate, no history — matches the design)."""
     ledger.upsert_record_state(target_type, target_key, pinned=1 if pinned else 0)

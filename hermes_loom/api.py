@@ -166,17 +166,6 @@ def h_record_annotate(ledger, params, query, body):
         return 400, {"ok": False, "error": str(e)}
 
 
-@route("POST", r"/api/records/reclassify")
-def h_record_reclassify(ledger, params, query, body):
-    try:
-        tt, tk = _record_target(body)
-        from . import overrides as _ov
-        res = _ov.reclassify_record(ledger, tt, tk, body["to_cat"], from_cat=body.get("from_cat"))
-        return 200, {"ok": True, **res}
-    except KeyError as e:
-        return 400, {"ok": False, "error": str(e)}
-
-
 @route("POST", r"/api/records/pin")
 def h_record_pin(ledger, params, query, body):
     try:

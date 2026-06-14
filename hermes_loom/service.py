@@ -280,9 +280,9 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
     return rec
 
 
-# Loom uses three categories only: 記憶 / 技能 / 偏好. (Hermes has no categories;
-# these are a Loom-side organizational layer. memory store → 記憶, user store →
-# 偏好, skills → 技能; the user can reclassify among these three.)
+# Loom uses three categories only: 記憶 / 技能 / 偏好, derived from the source
+# store (memory store → 記憶, user store → 偏好, skills → 技能). Hermes itself has
+# no categories; this is a fixed Loom-side label (manual reclassify was removed).
 _CAT_LABELS = {"memory": "記憶", "skill": "技能", "pref": "偏好"}
 
 

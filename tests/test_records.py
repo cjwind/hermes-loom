@@ -60,18 +60,15 @@ class TestRecords(LoomTestCase):
         # underlying file really changed
         self.assertIn("oolong", (self.hermes_home / "memories" / "USER.md").read_text())
 
-    def test_annotate_reclassify_pin(self):
+    def test_annotate_and_pin(self):
         led = self._seed()
         r = service.build_records(led)["records"][0]
         tt, tk = r["target_type"], r["target_key"]
         overrides.annotate_record(led, tt, tk, "只在工作情境適用")
-        overrides.reclassify_record(led, tt, tk, "memory", from_cat=r["cat"])
         overrides.set_pin(led, tt, tk, True)
         d = service.record_detail(led, f"{tt}:{tk}")
         self.assertEqual(d["annotation"]["text"], "只在工作情境適用")
-        self.assertEqual(d["cat"], "memory")
         self.assertTrue(d["pinned"])
-        self.assertEqual(d["reclassified"]["to"], "memory")
 
     def test_add_entry_for_delete_undo(self):
         led = self._seed()

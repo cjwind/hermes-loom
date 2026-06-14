@@ -201,16 +201,6 @@ async function doAnnotate(r, text) {
   });
 }
 
-async function doReclassify(r, toCat) {
-  const from = r.cat;
-  await api.post("/records/reclassify", { target_type: r.target_type, target_key: r.target_key, to_cat: toCat, from_cat: from });
-  await loadRecords((x) => x.id === r.id);
-  pushToast({
-    tone: "human", text: "已重新歸類到「" + catLabel(toCat) + "」",
-    onUndo: async () => { await api.post("/records/reclassify", { target_type: r.target_type, target_key: r.target_key, to_cat: from, from_cat: toCat }).catch(() => {}); await loadRecords((x) => x.id === r.id); },
-  });
-}
-
 async function doPin(r) {
   await api.post("/records/pin", { target_type: r.target_type, target_key: r.target_key, pinned: !r.pinned });
   await loadRecords((x) => x.id === r.id);
@@ -380,7 +370,6 @@ function renderDetail() {
     S.mode === "edit" ? editor(r, val) : el("div", { style: { fontSize: "18px", fontWeight: "600", letterSpacing: "-0.3px", lineHeight: "1.35", textWrap: "pretty" } }, val),
     S.mode !== "edit" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "4px" } }, r.detail),
     S.mode === null && actionRow(r),
-    S.mode === "reclass" && reclassComposer(r),
     S.mode === "anno" && annoComposer(r)));
 
   const body = el("div", { style: { flex: "1", overflow: "auto", padding: "20px 26px" } });
@@ -388,10 +377,6 @@ function renderDetail() {
     body.append(el("div", { class: "loom-anno", style: { marginBottom: "18px" } },
       el("div", { class: "hd" }, icon("note", { s: 11 }), "你的註解 · " + r.annotation.when),
       el("div", { style: { fontSize: "12.5px", color: "var(--text)", lineHeight: "1.55" } }, r.annotation.text)));
-  if (r.reclassified)
-    body.append(el("div", { style: { marginBottom: "18px", fontSize: "12px", color: "var(--text-2)", display: "flex", alignItems: "center", gap: "8px" } },
-      el("span", { class: "loom-tag tag-human", style: { height: "20px" } }, icon("flow", { s: 11 }), "已重新歸類"),
-      el("span", { html: "由你從 <b>" + catLabel(r.reclassified.from || r.cat) + "</b> 移到 <b>" + catLabel(r.reclassified.to) + "</b> · " + r.reclassified.when })));
   body.append(pipeline(r));
   host.append(body);
 }
@@ -410,7 +395,6 @@ function actionRow(r) {
   const isSkill = r.target_type === "skill";
   return el("div", { style: { display: "flex", gap: "8px", marginTop: "14px", position: "relative" } },
     el("button", { class: "loom-btn", onclick: () => enterEdit(r) }, icon("pencil", { s: 13 }), isSkill ? "編輯內容" : "編輯"),
-    el("button", { class: "loom-btn", onclick: () => { S.mode = "reclass"; renderDetail(); } }, icon("flow", { s: 13 }), "重新歸類"),
     el("button", { class: "loom-btn", onclick: () => enterAnno(r) }, icon("note", { s: 13 }), r.annotation ? "編輯註解" : "加註解"),
     el("div", { style: { flex: "1" } }),
     el("button", { class: "loom-btn", onclick: () => doPin(r) }, icon("pin", { s: 13 }), r.pinned ? "取消釘選" : "釘選"),
@@ -493,27 +477,6 @@ function annoComposer(r) {
     ta,
     el("div", { style: { display: "flex", gap: "8px", marginTop: "10px" } },
       el("button", { class: "loom-btn primary", onclick: () => { doAnnotate(r, ta.value); S.mode = null; } }, icon("check", { s: 13 }), "儲存註解"),
-      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
-}
-
-function reclassComposer(r) {
-  return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
-    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "10px" }, html: "把這筆從 <b style='color:var(--text)'>" + catLabel(r.cat) + "</b> 改歸到：" }),
-    el("div", { style: { display: "flex", gap: "7px", flexWrap: "wrap" } },
-      ...S.cats.map((c) => {
-        const cur = c.k === r.cat;
-        return el("button", {
-          class: "loom-tag", disabled: cur ? "" : null,
-          style: { height: "28px", padding: "0 12px", cursor: cur ? "default" : "pointer",
-            border: "1px solid " + (cur ? "var(--accent-line)" : "var(--border-2)"),
-            background: cur ? "var(--accent-soft)" : "var(--surface)",
-            color: cur ? "var(--accent-ink)" : "var(--text)", opacity: cur ? ".7" : "1" },
-          onclick: cur ? null : () => { doReclassify(r, c.k); S.mode = null; },
-        },
-          el("span", { style: { width: "7px", height: "7px", borderRadius: c.k === "struct" ? "50%" : "2px", background: "var(--cat-" + c.k + ")", display: "inline-block", marginRight: "6px" } }),
-          c.label + (cur ? " · 目前" : ""));
-      })),
-    el("div", { style: { display: "flex", marginTop: "11px" } },
       el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
 }
 

@@ -257,7 +257,6 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | POST | `/records/delete` | soft-delete (memory entry removed / skill disabled) |
 | POST | `/records/add` | `{store_type, text}` → append entry (used for delete-undo) |
 | POST | `/records/annotate` | `{target_type, target_key, text}` → private note (Loom-side only) |
-| POST | `/records/reclassify` | `{target_type, target_key, to_cat}` → Loom category override |
 | POST | `/records/pin` | `{target_type, target_key, pinned}` |
 | POST | `/overrides/memory/edit` | `{store_type, entry_key, new_text, reason?}` |
 | POST | `/overrides/memory/delete` | `{store_type, entry_key, reason?}` |
