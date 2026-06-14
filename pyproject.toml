@@ -20,11 +20,10 @@ test = []  # tests use stdlib unittest
 [project.scripts]
 hermes-loom = "hermes_loom.cli:main"
 
-# Hermes discovers plugins via this entry-point group. The plugin loader calls
-# `register(ctx)` on the referenced object. If your Hermes build uses a different
-# discovery mechanism, see README "Install the plugin" for the manual fallback.
-[project.entry-points."hermes.plugins"]
-hermes_loom = "hermes_loom.plugin:register"
+# NOTE: Hermes 0.16 discovers a plugin from $HERMES_HOME/plugins/<dir>/ via the
+# repo-root `plugin.yaml` manifest + the root `__init__.py` `register(ctx)` — see
+# README "Install the plugin". This package metadata is only for the standalone
+# CLI/API/UI side of Loom.
 
 [tool.setuptools]
 packages = ["hermes_loom"]

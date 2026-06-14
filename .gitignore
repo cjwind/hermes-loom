@@ -8,3 +8,7 @@ dist/
 ledger.db
 ledger.db-*
 *.loomtmp
+
+# stray export artifact (not part of the project)
+Hermes Loom.zip
+*.zip

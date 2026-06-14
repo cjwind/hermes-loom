@@ -155,42 +155,59 @@ python3 -m hermes_loom.cli status
 The plugin is **optional** — `ingest`/`reconcile` already give you visibility.
 Install it to capture growth the moment it happens.
 
-The entrypoint is `hermes_loom.plugin:register` (declared in both
-`pyproject.toml` under `[project.entry-points."hermes.plugins"]` and
-`hermes_plugin.toml`). Depending on your Hermes build:
+Hermes 0.16 discovers a plugin from `$HERMES_HOME/plugins/<dir>/` via a
+`plugin.yaml` manifest + a sibling `__init__.py` exposing `register(ctx)`. This
+repo ships both at its root, so the repo *is* the plugin directory.
+
+`hermes plugins install` only accepts a **Git URL / owner-repo**, so for a local
+checkout use the bundled installer (copies the runtime files into the plugins
+dir, then you enable + restart):
 
 ```bash
-# Preferred: Hermes' plugin manager
-hermes plugins install /path/to/hermes-loom
-hermes plugins list        # should show hermes-loom
+# Local Hermes:
+scripts/install-plugin.sh
+hermes plugins enable hermes-loom
+hermes gateway restart            # restart however you run Hermes
 
-# Manual fallback (older builds): point a hook at the registrar in config.yaml
-#   hooks:
-#     memory_write: hermes_loom.plugin:register   # exact key depends on build
+# Remote Hermes over SSH (e.g. a Raspberry Pi):
+scripts/install-plugin.sh rpi
+ssh rpi 'hermes plugins enable hermes-loom && hermes gateway restart'
+
+# Or, if you push this repo to git:
+hermes plugins install <git-url> --enable
 ```
 
-`register(ctx)` binds **defensively**: it tries several hook-name aliases per
-point (`memory_write`/`on_memory_write`, `tool_post`/`post_tool_call`, …) and
-**skips any the running Hermes does not expose**, logging what it bound. It also
-spawns the snapshot/ingest fallback once at load, so even a Hermes build that
-exposes *zero* bindable hooks still gets coverage. Every callback is wrapped so a
-failure is logged and swallowed — **the plugin can never crash Hermes' main
-flow.**
+Verify:
 
-### Hook coverage & honesty about limits
+```bash
+hermes plugins list               # hermes-loom -> enabled
+```
 
-Hermes' documented hook surface for memory/skill mutations is not guaranteed to
-cover every internal write path, and the exact hook names differ across builds.
-Rather than assume a perfect hook, Loom's MVP strategy is explicitly
-**"hook + snapshot-diff fallback + state.db ingest"**:
+### What the plugin binds (verified against Hermes 0.16)
 
-* memory writes → caught by the memory hook **or** by `state.db` ingest (Hermes
-  logs the `memory` tool call) **or** by snapshot diff.
-* skill writes → caught by the tool-post hook **or** by snapshot diff (skill file
-  hashes compared to the last snapshot).
+`register(ctx)` binds the **real** hooks Hermes exposes:
 
-So even in the worst case (no usable hooks), you still see what grew — just via
-`statedb_ingest` / `snapshot_diff` instead of `plugin_hook`.
+* **`post_tool_call`** — memory and skill changes are not dedicated hooks; they
+  flow through the `memory` and `skill_manage` *tools*. The callback receives
+  `(*, tool_name, args, result, session_id, tool_call_id, **_)`, so Hermes hands
+  us the **session id directly** → precise, real-time provenance (`plugin_hook`).
+  Failed tool calls and read-only `skill_view` are ignored.
+* **`on_session_start`** — runs the bootstrap + snapshot-diff fallback so nothing
+  is silently missed.
+* a **`loom_sync`** tool (toolset `loom`) you can call from Hermes to reconcile
+  the ledger on demand.
+
+Every callback is wrapped so a failure is logged and swallowed — **the plugin can
+never crash Hermes' main flow.** It also spawns the fallback once at load, so even
+a build that exposes *zero* bindable hooks still gets coverage. (Validated by
+loading the plugin under a real Hermes 0.16 venv and firing `post_tool_call`.)
+
+### Defense in depth
+
+Even if a write path isn't hooked, you still see it — Loom layers three sources:
+`plugin_hook` (live) → `statedb_ingest` (Hermes logs the `memory` tool call in
+`state.db`) → `snapshot_diff` (file-hash comparison). Worst case, growth shows up
+via ingest/snapshot instead of the live hook.
 
 ---
 

@@ -1,0 +1,13 @@
+# Hermes Loom plugin manifest (Hermes 0.16+ plugin format).
+#
+# Hermes discovers this plugin from $HERMES_HOME/plugins/<dir>/ by reading this
+# manifest, then imports the sibling __init__.py and calls register(ctx).
+name: hermes-loom
+version: 0.1.0
+description: >-
+  Growth observability & tuning sidecar. Observes memory/skill changes via the
+  post_tool_call hook and records them (with provenance) to an append-only Loom
+  ledger. Provides a loom_sync tool to reconcile the ledger on demand.
+provides_tools:
+  - loom_sync
+requires_env: []

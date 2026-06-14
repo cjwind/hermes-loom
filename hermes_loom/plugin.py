@@ -1,29 +1,32 @@
-"""Hermes plugin — the live observation entrypoint.
+"""Hermes plugin — live observation entrypoint.
 
-Hermes loads plugins and calls ``register(ctx)``. We use the documented surface
-(``ctx.register_tool`` / ``ctx.register_hook`` and the memory-provider
-``on_memory_write`` concept) to observe memory/skill mutations in real time and
-forward them to the Loom ledger.
+Written against the **real** Hermes 0.16 plugin contract (verified against the
+installed runtime), not a guess:
 
-IMPORTANT — graceful degradation:
-  * This module imports nothing from Hermes. It only *uses* whatever ``ctx``
-    offers, guarded by ``hasattr`` / ``try`` so it works across Hermes versions
-    and never crashes the host. If a hook point is unavailable, we register what
-    we can and rely on the state.db ingest + snapshot-diff fallback (run on a
-    timer / at startup) to fill the gap.
-  * Every callback is wrapped so an exception is logged and swallowed — the
-    plugin can fail without taking down Hermes' main flow (Part 4 requirement).
+  * Hermes discovers a plugin from ``$HERMES_HOME/plugins/<name>/`` via a
+    ``plugin.yaml`` manifest + an ``__init__.py`` exposing ``register(ctx)``.
+  * ``ctx.register_hook(hook_name, callback)`` — valid hooks include
+    ``post_tool_call`` and ``on_session_start``. Unknown names only warn.
+  * Memory and skill changes are **not** dedicated hooks — they flow through the
+    ``memory`` and ``skill_manage`` *tools*. We therefore observe them via
+    ``post_tool_call``, whose callback is invoked with keyword args:
+      ``(*, tool_name="", args=None, result=None, session_id="",
+          tool_call_id="", **_)``
+    i.e. Hermes hands us the session id directly → precise, real-time provenance.
+  * ``ctx.register_tool(name, toolset, schema, handler, description=...)`` lets us
+    expose a ``loom_sync`` tool the user can call from Hermes.
 
-Hooks we attempt to bind (names are matched leniently against what ctx exposes):
-  * memory write   -> on_memory_write(action, target, content)
-  * tool post-call -> to catch skill_create/edit/patch/delete tool results
-  * session start  -> opportunistic reconcile/ingest
+Robustness: this module imports nothing from Hermes and probes ``ctx`` with
+``hasattr``/``try`` so it works across versions; every callback is wrapped so an
+exception is logged and swallowed — the plugin can never crash Hermes' main flow.
+If a hook point is missing, the snapshot-diff + state.db ingest fallbacks (run at
+load and on ``on_session_start``) still provide coverage.
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import os
 import threading
 
 from .ledger import Ledger
@@ -34,16 +37,22 @@ log = logging.getLogger("hermes_loom.plugin")
 PLUGIN_NAME = "hermes-loom"
 PLUGIN_VERSION = "0.1.0"
 
-# Hermes-side memory/skill tool names we treat as mutations.
-_SKILL_WRITE_TOOLS = {
-    "skill_create", "skill_edit", "skill_patch", "skill_delete",
-    "skill_write", "skill_update", "skill_remove",
+# Hermes tool names we treat as growth signals (verified in the runtime registry).
+_MEMORY_TOOL = "memory"
+_SKILL_WRITE_TOOL = "skill_manage"   # skill_view is read-only and ignored
+
+_SKILL_ACTION_KIND = {
+    "create": "create", "add": "create", "new": "create",
+    "edit": "edit", "update": "edit", "write": "edit",
+    "patch": "patch",
+    "delete": "delete", "remove": "delete", "rm": "delete",
 }
-_SKILL_ACTION_BY_TOOL = {
-    "skill_create": "create", "skill_write": "create",
-    "skill_edit": "edit", "skill_update": "edit",
-    "skill_patch": "patch",
-    "skill_delete": "delete", "skill_remove": "delete",
+
+LOOM_SYNC_SCHEMA = {
+    "name": "loom_sync",
+    "description": "Reconcile the Hermes Loom growth ledger with current memory/skills "
+                   "(runs state.db ingest + snapshot diff). Returns a small summary.",
+    "parameters": {"type": "object", "properties": {}, "required": []},
 }
 
 
@@ -55,7 +64,20 @@ def _safe(fn):
         except Exception:  # noqa: BLE001
             log.exception("hermes-loom callback failed (degraded, Hermes unaffected)")
             return None
+    wrapper.__name__ = getattr(fn, "__name__", "loom_cb")
     return wrapper
+
+
+def _as_dict(v):
+    if isinstance(v, dict):
+        return v
+    if isinstance(v, str):
+        try:
+            d = json.loads(v)
+            return d if isinstance(d, dict) else {}
+        except (json.JSONDecodeError, TypeError):
+            return {}
+    return {}
 
 
 class LoomPlugin:
@@ -63,122 +85,104 @@ class LoomPlugin:
         self.ledger = Ledger()
         self.observer = Observer(self.ledger)
 
-    # -- memory provider hook -----------------------------------------------
-    def on_memory_write(self, action, target, content, **extra):
-        """Memory-provider style hook. ``extra`` may carry session_id/before."""
+    # -- the one hook that catches memory + skill mutations ------------------
+    def on_post_tool_call(self, *, tool_name="", args=None, result=None,
+                          session_id="", tool_call_id="", **_):
+        if tool_name == _MEMORY_TOOL:
+            self._record_memory(args, result, session_id, tool_call_id)
+        elif tool_name == _SKILL_WRITE_TOOL:
+            self._record_skill(args, result, session_id, tool_call_id)
+
+    def _record_memory(self, args, result, session_id, tool_call_id):
+        a = _as_dict(args)
+        res = _as_dict(result)
+        if res.get("success") is False:
+            return  # the tool call failed; nothing actually changed
+        action = a.get("action", "add")
+        target = a.get("target", "memory")
+        content = a.get("content") or a.get("text")
         self.observer.on_memory_write(
             action, target, content,
-            before_text=extra.get("before") or extra.get("before_text"),
-            session_id=extra.get("session_id") or _current_session(extra),
+            session_id=session_id or None,
             source_hint="plugin_hook",
-            tool_name="memory",
+            tool_name=_MEMORY_TOOL,
+            metadata={"tool_call_id": tool_call_id, "result": res.get("message")},
         )
 
-    # -- generic post-tool hook ---------------------------------------------
-    def on_tool_call(self, event):
-        """Catch skill mutations from a tool post-call hook.
-
-        ``event`` is treated as a mapping/object exposing name + arguments +
-        session id. We read defensively to survive schema differences.
-        """
-        name = _get(event, "tool_name") or _get(event, "name")
-        if name not in _SKILL_WRITE_TOOLS:
+    def _record_skill(self, args, result, session_id, tool_call_id):
+        a = _as_dict(args)
+        res = _as_dict(result)
+        if res.get("success") is False:
             return
-        args = _get(event, "arguments") or _get(event, "args") or {}
-        if isinstance(args, str):
-            import json
-            try:
-                args = json.loads(args)
-            except Exception:  # noqa: BLE001
-                args = {}
-        skill_name = args.get("name") or args.get("skill") or "unknown"
-        action = _SKILL_ACTION_BY_TOOL.get(name, "edit")
+        raw_action = (a.get("action") or "edit").lower()
+        action = _SKILL_ACTION_KIND.get(raw_action, "edit")
+        skill_name = a.get("skill_name") or a.get("name") or a.get("skill") or "unknown"
+        content = a.get("skill_md") or a.get("content") or a.get("body")
         self.observer.on_skill_write(
-            action, skill_name,
-            content=args.get("content") or args.get("body"),
-            session_id=_get(event, "session_id"),
-            tool_name=name,
+            action, skill_name, content=content,
+            session_id=session_id or None,
             source_hint="plugin_hook",
+            tool_name=_SKILL_WRITE_TOOL,
+            metadata={"tool_call_id": tool_call_id, "result": res.get("message")},
         )
 
     # -- startup safety net --------------------------------------------------
     def on_session_start(self, *_a, **_k):
-        """Opportunistically run the fallback so we never silently miss growth."""
         from . import snapshot
         snapshot.bootstrap(self.ledger)
         snapshot.reconcile_all(self.ledger)
 
-
-def _current_session(extra):
-    return extra.get("session") or os.environ.get("HERMES_SESSION_ID")
-
-
-def _get(obj, key, default=None):
-    if isinstance(obj, dict):
-        return obj.get(key, default)
-    return getattr(obj, key, default)
+    # -- user-invokable tool -------------------------------------------------
+    def loom_sync_tool(self, **_kwargs):
+        from . import ingest, snapshot
+        rec = snapshot.reconcile_all(self.ledger)
+        ing = ingest.ingest_state_db(self.ledger)
+        return {"reconcile": {k: len(v) for k, v in rec.items()}, "ingest": ing}
 
 
 def register(ctx):
-    """Hermes plugin entrypoint.
-
-    We bind to whatever hook points ``ctx`` exposes. Unknown points are skipped
-    (logged), and the snapshot-diff + state.db ingest fallbacks cover the rest.
-    """
+    """Hermes plugin entrypoint. Binds the real hooks; degrades if absent."""
     plugin = LoomPlugin()
     bound = []
 
-    # 1) Memory-provider style hook
-    for hook_name in ("memory_write", "on_memory_write", "memory.write"):
-        if _try_register_hook(ctx, hook_name, _safe(plugin.on_memory_write)):
-            bound.append(hook_name)
-            break
+    if _register_hook(ctx, "post_tool_call", _safe(plugin.on_post_tool_call)):
+        bound.append("post_tool_call")
+    if _register_hook(ctx, "on_session_start", _safe(plugin.on_session_start)):
+        bound.append("on_session_start")
 
-    # 2) Post tool-call hook (for skills + as a memory backstop)
-    for hook_name in ("tool_post", "post_tool_call", "after_tool_call", "tool_call"):
-        if _try_register_hook(ctx, hook_name, _safe(plugin.on_tool_call)):
-            bound.append(hook_name)
-            break
+    _register_tool(ctx, plugin)
 
-    # 3) Session start -> run fallback
-    for hook_name in ("session_start", "on_session_start"):
-        if _try_register_hook(ctx, hook_name, _safe(plugin.on_session_start)):
-            bound.append(hook_name)
-            break
-
-    # 4) Expose a manual tool so the user can trigger a Loom sync from Hermes.
-    _try_register_tool(ctx, plugin)
-
-    # Always run the fallback once at load, in the background, so coverage is
-    # immediate even if zero hooks were bindable on this Hermes version.
+    # Run the fallback once at load (background) so coverage is immediate even if
+    # no hooks were bindable on this Hermes build.
     threading.Thread(target=_safe(plugin.on_session_start), daemon=True).start()
 
-    log.info("hermes-loom registered (hooks bound: %s)", bound or "none — fallback only")
+    log.info("hermes-loom registered (hooks: %s)", bound or "none — fallback only")
     return {"name": PLUGIN_NAME, "version": PLUGIN_VERSION, "hooks": bound}
 
 
-def _try_register_hook(ctx, name, cb) -> bool:
+def _register_hook(ctx, name, cb) -> bool:
     reg = getattr(ctx, "register_hook", None)
     if not callable(reg):
         return False
     try:
         reg(name, cb)
         return True
-    except Exception:  # noqa: BLE001 - this hook point may not exist; that's fine
+    except Exception:  # noqa: BLE001 - hook point may be unavailable; that's fine
+        log.debug("could not bind hook %s", name, exc_info=True)
         return False
 
 
-def _try_register_tool(ctx, plugin):
+def _register_tool(ctx, plugin):
     reg = getattr(ctx, "register_tool", None)
     if not callable(reg):
         return
-    def loom_sync(**_kwargs):
-        from . import snapshot, ingest
-        r1 = snapshot.reconcile_all(plugin.ledger)
-        r2 = ingest.ingest_state_db(plugin.ledger)
-        return {"reconcile": {k: len(v) for k, v in r1.items()}, "ingest": r2}
     try:
-        reg("loom_sync", _safe(loom_sync),
-            description="Hermes Loom: reconcile growth ledger with current memory/skills.")
+        reg(
+            name="loom_sync",
+            toolset="loom",
+            schema=LOOM_SYNC_SCHEMA,
+            handler=_safe(plugin.loom_sync_tool),
+            description=LOOM_SYNC_SCHEMA["description"],
+        )
     except Exception:  # noqa: BLE001
-        pass
+        log.debug("could not register loom_sync tool", exc_info=True)
