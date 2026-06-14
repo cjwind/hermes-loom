@@ -48,15 +48,20 @@ reconcile: ## Run the snapshot-diff fallback now
 ## --- quality ---------------------------------------------------------------
 
 .PHONY: test
-test: ## Run the unittest suite
+test: ## Run the Python unittest suite
 	$(PY) -m unittest discover -s tests -p 'test_*.py' -v
 
+.PHONY: test-ui
+test-ui: ## Run the JS component test (Inspector skill filter, needs node)
+	node tests/ui_filter_test.js
+
 .PHONY: compile
-compile: ## Byte-compile all sources (fast syntax check)
+compile: ## Byte-compile sources + syntax-check the UI
 	$(PY) -m py_compile hermes_loom/*.py tests/*.py && echo "compile OK"
+	node --check ui/app.js && echo "app.js syntax OK"
 
 .PHONY: check
-check: compile test ## compile + test
+check: compile test test-ui ## compile + python tests + UI component test
 
 ## --- housekeeping ----------------------------------------------------------
 

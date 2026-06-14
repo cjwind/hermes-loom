@@ -100,7 +100,7 @@ function diffEl(a, b) {
 
 // ───────────────────────── state ─────────────────────────
 const S = {
-  records: [], cats: [], selId: null,
+  records: [], cats: [], selId: null, skillSummary: null,
   filter: "all", query: "", humanOnly: false,
   toasts: [], mode: null, draft: "", menuOpen: false,
 };
@@ -114,7 +114,7 @@ const selected = () => S.records.find((r) => r.id === S.selId) || null;
 // ───────────────────────── data load ─────────────────────────
 async function loadRecords(prefer) {
   const data = await api.get("/records");
-  S.records = data.records; S.cats = data.cats;
+  S.records = data.records; S.cats = data.cats; S.skillSummary = data.skill_summary || null;
   if (prefer) {
     const m = S.records.find(prefer);
     if (m) S.selId = m.id;
@@ -130,6 +130,9 @@ async function loadRecords(prefer) {
 function visibleRecords() {
   const q = S.query.toLowerCase();
   return S.records
+    // Only "new deposit" skills are shown. Non-agent-created skills are hidden
+    // from the main list (data is NOT deleted — just filtered on metadata).
+    .filter((r) => r.target_type !== "skill" || r.is_agent_created)
     .filter((r) => S.filter === "all" || r.cat === S.filter)
     .filter((r) => !S.humanOnly || isTouched(r))
     .filter((r) => !q || (activeValue(r) + r.detail + r.origin).toLowerCase().includes(q));
@@ -351,7 +354,18 @@ function renderRailList() {
     list.append(el("div", { style: { height: "1px", background: "var(--border)", margin: "7px 10px" } }));
   }
   rest.forEach((r) => list.append(listRow(r)));
-  if (!vis.length) list.append(el("div", { style: { padding: "30px 14px", textAlign: "center", color: "var(--text-4)", fontSize: "12px" } }, "沒有符合的沉澱"));
+  if (!vis.length) {
+    const msg = S.filter === "skill" ? "目前沒有新沉澱的 skills" : "沒有符合的沉澱";
+    list.append(el("div", { style: { padding: "30px 14px", textAlign: "center", color: "var(--text-4)", fontSize: "12px" } }, msg));
+  }
+  // when viewing skills, show how many are shown vs how many exist in Hermes
+  if (S.filter === "skill" && S.skillSummary) {
+    const ss = S.skillSummary;
+    list.append(el("div", { class: "loom-mono", style: { padding: "10px 12px 4px", fontSize: "10px", color: "var(--text-4)", lineHeight: "1.6" } },
+      `顯示 ${ss.agent_created} / ${ss.total} 個技能（只列新沉澱）`,
+      el("br"),
+      `其餘：Hermes 官方 ${ss.hermes_official} · 社群 ${ss.community}（已隱藏）`));
+  }
 }
 
 // ───────────────────────── detail ─────────────────────────
@@ -385,10 +399,21 @@ function detailMetaRow(r) {
   return el("div", { style: { display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px" } },
     catChip(r.cat),
     touchedTag(isTouched(r)),
+    r.target_type === "skill" && r.origin_type && originBadge(r),
     r.pinned && el("span", { class: "loom-tag", style: { height: "19px", background: "var(--accent-soft)", color: "var(--accent-ink)" } }, icon("pin", { s: 10 }), "已釘選"),
     el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-4)" } }, r.id),
     el("div", { style: { flex: "1" } }),
     conf(r.conf));
+}
+function originBadge(r) {
+  const map = {
+    agent_created: { bg: "var(--accent-soft)", fg: "var(--accent-ink)", t: "新沉澱 · agent 產生" },
+    hermes_official: { bg: "var(--surface-3)", fg: "var(--text-2)", t: "Hermes 官方 / 原生" },
+    community: { bg: "var(--surface-3)", fg: "var(--text-3)", t: "外部 / 社群" },
+  };
+  const m = map[r.origin_type] || map.community;
+  return el("span", { class: "loom-tag", style: { height: "19px", background: m.bg, color: m.fg }, title: r.author ? "author: " + r.author : "" },
+    icon("spark", { s: 10 }), m.t);
 }
 
 function actionRow(r) {

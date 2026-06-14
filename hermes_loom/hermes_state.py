@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional
 
-from . import config
+from . import config, skill_origin
 
 
 def _sha(text: str) -> str:
@@ -92,6 +92,7 @@ def list_skills() -> List[dict]:
         skill_dir = skill_md.parent
         name = fm.get("name") or skill_dir.name
         category = parts[0] if len(parts) > 1 else ""
+        origin = skill_origin.classify_skill_origin(fm)  # computed once, in the loader
         out.append({
             "name": name,
             "dir_name": skill_dir.name,
@@ -103,6 +104,11 @@ def list_skills() -> List[dict]:
             "mtime": skill_md.stat().st_mtime,
             "hash": _sha(content),
             "size": len(content),
+            # origin classification (single source of truth: skill_origin.py)
+            "is_agent_created": origin["is_agent_created"],
+            "origin_type": origin["origin_type"],
+            "author": origin["author"],
+            "created_by": origin["created_by"],
         })
     return out
 

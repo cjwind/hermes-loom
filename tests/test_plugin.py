@@ -76,8 +76,12 @@ class TestPlugin(LoomTestCase):
            result={"success": False})           # failed -> ignored
         cb(tool_name="skill_view", args={"name": "demo"}, result={"success": True})  # read-only
         led = self.ledger()
-        self.assertEqual(len(led.query_events(target_type="memory")), 0)
-        self.assertEqual(len(led.query_events(target_type="user")), 0)
+        # assert by kind (the background on_session_start bootstrap may add a
+        # memory_snapshot_imported for USER.md, which is unrelated to these calls)
+        self.assertEqual(len(led.query_events(kind="memory_added")), 0)
+        self.assertEqual(len(led.query_events(kind="memory_replaced")), 0)
+        self.assertEqual([e for e in led.query_events(target_type="skill")
+                          if e["kind"] != "skill_snapshot_imported"], [])
 
     def test_args_may_be_json_string(self):
         self.write_memory("user", "fact")

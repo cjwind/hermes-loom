@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 from typing import Optional
 
-from . import hermes_state, overrides
+from . import hermes_state, overrides, skill_origin
 from .ledger import Ledger
 from .memory_parser import parse_entries
 
@@ -78,7 +78,8 @@ def list_skills(ledger: Ledger) -> dict:
         evs = ledger.events_for_target("skill", s["name"])
         last = evs[0] if evs else None
         result.append({
-            **{k: s[k] for k in ("name", "category", "description", "tags", "mtime", "path")},
+            **{k: s[k] for k in ("name", "category", "description", "tags", "mtime", "path",
+                                 "is_agent_created", "origin_type", "author")},
             "event_count": len(evs),
             "last_event": _event_summary(last) if last else None,
         })
@@ -92,7 +93,8 @@ def skill_detail(ledger: Ledger, name: str) -> Optional[dict]:
         return None
     evs = ledger.events_for_target("skill", name)
     return {
-        "skill": {k: full[k] for k in ("name", "category", "description", "tags", "path", "content")},
+        "skill": {k: full[k] for k in ("name", "category", "description", "tags", "path", "content",
+                                       "is_agent_created", "origin_type", "author")},
         "events": [_event_summary(e) for e in evs],
         "overrides": ledger.overrides_for_target("skill", name),
     }
@@ -290,6 +292,15 @@ def _cat_label(k: str) -> str:
     return _CAT_LABELS.get(k, k)
 
 
+def _tag_skill_origin(rec: dict, skill: dict) -> dict:
+    """Attach origin classification (from the loader) onto a skill record."""
+    rec["is_agent_created"] = skill.get("is_agent_created", False)
+    rec["origin_type"] = skill.get("origin_type", "community")
+    rec["origin_label"] = skill_origin.ORIGIN_LABELS.get(rec["origin_type"], rec["origin_type"])
+    rec["author"] = skill.get("author")
+    return rec
+
+
 def build_records(ledger: Ledger) -> dict:
     states = ledger.all_record_states()
     records = []
@@ -297,13 +308,21 @@ def build_records(ledger: Ledger) -> dict:
         content = hermes_state.read_memory(store)
         for e in parse_entries(content or ""):
             records.append(_build_record(ledger, store, e["key"], e["text"], states))
-    for s in hermes_state.list_skills():
+
+    skills = hermes_state.list_skills()
+    skill_summary = {"total": len(skills), "agent_created": 0,
+                     "hermes_official": 0, "community": 0}
+    for s in skills:
+        skill_summary[s.get("origin_type", "community")] = \
+            skill_summary.get(s.get("origin_type", "community"), 0) + 1
         val = s.get("description") or s["name"]
-        records.append(_build_record(
-            ledger, "skill", s["name"], val, states,
-            detail=f"技能 · {s.get('category') or ''}".strip(" ·")))
+        rec = _build_record(ledger, "skill", s["name"], val, states,
+                            detail=f"技能 · {s.get('category') or ''}".strip(" ·"))
+        records.append(_tag_skill_origin(rec, s))
+
     return {"count": len(records), "records": records,
-            "cats": [{"k": k, "label": v} for k, v in _CAT_LABELS.items()]}
+            "cats": [{"k": k, "label": v} for k, v in _CAT_LABELS.items()],
+            "skill_summary": skill_summary}
 
 
 def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
@@ -320,9 +339,10 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
         if not full:
             return None
         val = full.get("description") or key
-        return _build_record(ledger, "skill", key, val, states,
-                             detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
-                             skill_content=full["content"])
+        rec = _build_record(ledger, "skill", key, val, states,
+                            detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
+                            skill_content=full["content"])
+        return _tag_skill_origin(rec, full)
     return None
 
 
