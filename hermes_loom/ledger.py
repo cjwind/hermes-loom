@@ -146,6 +146,21 @@ CREATE TABLE IF NOT EXISTS record_tags (
 );
 CREATE INDEX IF NOT EXISTS idx_tags_tag ON record_tags(tag);
 
+-- SOUL.md versions: Loom owns an editable copy of the agent identity file.
+-- Append-only history; the newest row is the current edited content. Unlike
+-- memory/skills (observed FROM Hermes), SOUL content is authored IN Loom and
+-- compiled OUT to ~/.hermes/SOUL.md on demand. ``source`` records provenance:
+-- 'seed' (imported from the live file) | 'ui_edit' (saved from the editor).
+CREATE TABLE IF NOT EXISTS soul_versions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    content TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    source TEXT,
+    note TEXT,
+    created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_soul_created ON soul_versions(created_at DESC);
+
 -- Per-record UI/tuning state for the Inspector: pin, reclassify, annotation.
 -- Keyed by (target_type, target_key). Best-effort: memory keys are content
 -- hashes, so pins/notes are re-anchored on the new key after an edit.
@@ -350,6 +365,34 @@ class Ledger:
             (skill_name,),
         ).fetchone()
         return dict(row) if row else None
+
+    # -- soul versions -------------------------------------------------------
+    def add_soul_version(
+        self, content: str, content_hash: str, *, source: str = "ui_edit",
+        note: Optional[str] = None, created_at: Optional[float] = None,
+    ) -> int:
+        with self._lock:
+            cur = self.conn.execute(
+                "INSERT INTO soul_versions(content,content_hash,source,note,created_at)"
+                " VALUES (?,?,?,?,?)",
+                (content, content_hash, source, note, created_at or _now()),
+            )
+            self.conn.commit()
+            return int(cur.lastrowid)
+
+    def latest_soul_version(self) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM soul_versions ORDER BY created_at DESC, id DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row else None
+
+    def soul_history(self, limit: int = 50) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT id, content_hash, source, note, created_at, length(content) AS size "
+            "FROM soul_versions ORDER BY created_at DESC, id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
     # -- source sessions cache ----------------------------------------------
     def upsert_session(

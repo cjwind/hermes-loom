@@ -8,6 +8,9 @@ Endpoints (see README for full list):
   GET  /api/events
   GET  /api/events/{id}
   GET  /api/memory/current
+  GET  /api/soul                      (current SOUL.md: DB content + live-file sync)
+  POST /api/soul/save                 (store edited SOUL content as a DB version)
+  POST /api/soul/compile              (write DB SOUL content out to ~/.hermes/SOUL.md)
   GET  /api/skills
   GET  /api/skills/{name}
   GET  /api/sessions/{id}/context
@@ -224,6 +227,35 @@ def h_record_pin(ledger, params, query, body):
         res = _ov.set_pin(ledger, tt, tk, bool(body.get("pinned", True)))
         return 200, {"ok": True, **res}
     except KeyError as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+# ---- SOUL.md (Loom-owned identity file) ---------------------------------
+
+@route("GET", r"/api/soul")
+def h_soul(ledger, params, query, body):
+    from . import soul
+    return 200, soul.current(ledger)
+
+
+@route("POST", r"/api/soul/save")
+def h_soul_save(ledger, params, query, body):
+    from . import soul
+    try:
+        if "content" not in body:
+            raise KeyError("content required")
+        res = soul.save(ledger, body["content"], note=body.get("note"))
+        return 200, {"ok": True, **res}
+    except (KeyError, ValueError) as e:
+        return 400, {"ok": False, "error": str(e)}
+
+
+@route("POST", r"/api/soul/compile")
+def h_soul_compile(ledger, params, query, body):
+    from . import soul
+    try:
+        return 200, {"ok": True, **soul.compile_to_hermes(ledger)}
+    except ValueError as e:
         return 400, {"ok": False, "error": str(e)}
 
 

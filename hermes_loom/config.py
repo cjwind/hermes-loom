@@ -46,6 +46,16 @@ def skills_dir() -> Path:
     return hermes_home() / "skills"
 
 
+def soul_md_path() -> Path:
+    """``SOUL.md`` — the agent identity slot (#1) in Hermes' system prompt.
+
+    A plain free-form file (no entry/round-trip parsing on Hermes' side), loaded
+    via ``prompt_builder.load_soul_md``. Loom owns an editable copy in its DB and
+    compiles it back out to this path.
+    """
+    return hermes_home() / "SOUL.md"
+
+
 def state_db_path() -> Path:
     """Hermes session store (read-only from Loom's perspective)."""
     return hermes_home() / "state.db"

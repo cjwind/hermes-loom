@@ -105,6 +105,7 @@ const S = {
   records: [], cats: [], selId: null, skillSummary: null,
   filter: "all", query: "", humanOnly: false,
   toasts: [], mode: null, draft: "", menuOpen: false,
+  view: "inspector", soul: null,
 };
 const D = {}; // persistent DOM refs
 
@@ -296,9 +297,45 @@ function buildHeader() {
     el("div", { class: "loom-brand" },
       el("div", { class: "loom-logo" }),
       el("div", { class: "loom-name", html: 'Hermes Loom <span class="sub">/ 檢視台</span>' })),
+    buildNav(),
     pill,
     el("div", { class: "loom-top-spacer" }),
     stats, recallBtn, themeBtn);
+}
+
+// Top-level view switcher: the Inspector (observed growth) vs the SOUL editor.
+const NAV_VIEWS = [
+  { k: "inspector", label: "檢視台", icon: "flow" },
+  { k: "soul", label: "SOUL", icon: "spark" },
+];
+function buildNav() {
+  const nav = el("div", { style: { display: "flex", gap: "2px", padding: "2px", borderRadius: "8px", background: "var(--surface-2)", marginLeft: "14px" } });
+  D.nav = nav;
+  paintNav();
+  return nav;
+}
+function paintNav() {
+  if (!D.nav) return;
+  D.nav.replaceChildren(...NAV_VIEWS.map((v) => {
+    const on = S.view === v.k;
+    return el("button", {
+      class: "loom-btn", style: {
+        height: "26px", padding: "0 11px", fontSize: "12px", border: "none",
+        background: on ? "var(--surface)" : "transparent",
+        color: on ? "var(--text)" : "var(--text-3)",
+        boxShadow: on ? "var(--shadow-1, 0 1px 2px rgba(0,0,0,.08))" : "none",
+        fontWeight: on ? "600" : "500",
+      },
+      onclick: () => setView(v.k),
+    }, icon(v.icon, { s: 13 }), v.label);
+  }));
+}
+function setView(v) {
+  S.view = v;
+  if (D.inspectorBody) D.inspectorBody.style.display = v === "inspector" ? "flex" : "none";
+  if (D.soulBody) D.soulBody.style.display = v === "soul" ? "block" : "none";
+  paintNav();
+  if (v === "soul") renderSoul();
 }
 
 // Modal: recent context injections (from recall_log, written by the gateway hook)
@@ -791,6 +828,70 @@ async function viewSession(sid) {
   }
 }
 
+// ───────────────────────── SOUL editor ─────────────────────────
+function soulDirty() {
+  return !!(D.soulText && S.soul && D.soulText.value !== S.soul.content);
+}
+function soulStatusChildren() {
+  const d = S.soul;
+  if (!d) return [];
+  const out = [];
+  if (d.in_sync === true) out.push(el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, icon("check", { s: 11 }), "已與磁碟同步"));
+  else if (d.in_sync === false) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--human-soft)", color: "var(--human)" } }, icon("spark", { s: 11 }), "DB 較新 · 尚未編譯"));
+  if (!d.disk.exists) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--human-soft)", color: "var(--human)" } }, "磁碟上沒有 SOUL.md"));
+  if (d.updated_at) out.push(el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), "DB 版本：" + fmtTime(d.updated_at)));
+  if (soulDirty()) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--surface-3)", color: "var(--del)" } }, "有未儲存的編輯"));
+  return out;
+}
+function paintSoulStatus() {
+  if (D.soulStatus) D.soulStatus.replaceChildren(...soulStatusChildren());
+}
+async function renderSoul() {
+  const host = D.soulBody;
+  host.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, "載入 SOUL.md…"));
+  let data;
+  try { data = await api.get("/soul"); }
+  catch (e) { host.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  S.soul = data;
+  const ta = el("textarea", {
+    class: "loom-input",
+    style: { width: "100%", height: "auto", minHeight: "46vh", resize: "vertical", fontFamily: "IBM Plex Mono, ui-monospace, monospace", fontSize: "13px", lineHeight: "1.6", padding: "14px 16px", boxSizing: "border-box" },
+    oninput: paintSoulStatus,
+  });
+  ta.value = data.content || "";
+  D.soulText = ta;
+  D.soulStatus = el("div", { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", minHeight: "22px" } });
+
+  host.replaceChildren(el("div", { style: { maxWidth: "880px", margin: "0 auto", padding: "26px 28px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
+    el("div", {},
+      el("div", { style: { display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" } },
+        icon("spark", { s: 18, color: "var(--accent)" }),
+        el("div", { style: { fontSize: "19px", fontWeight: "700", letterSpacing: "-.3px" } }, "SOUL.md"),
+        el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-4)" } }, data.disk.path)),
+      el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "5px", lineHeight: "1.6" } },
+        "Hermes 的身份／人格檔（system prompt 的第一段）。在這裡編輯會存進 Loom 的資料庫；按「編譯到 SOUL.md」才會寫回上面的檔案（並先備份）。")),
+    D.soulStatus,
+    ta,
+    el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
+      el("button", { class: "loom-btn primary", onclick: doSoulSave }, icon("check", { s: 14 }), "儲存到 Loom"),
+      el("button", { class: "loom-btn", onclick: doSoulCompile }, icon("flow", { s: 14 }), "編譯到 SOUL.md"),
+      el("button", { class: "loom-btn ghost", onclick: () => renderSoul() }, icon("undo", { s: 13 }), "重新載入"),
+      el("div", { style: { flex: "1" } }),
+      el("span", { class: "loom-meta" }, (data.history || []).length + " 個版本"))));
+  paintSoulStatus();
+}
+const doSoulSave = guard(async function () {
+  const res = await api.post("/soul/save", { content: D.soulText.value });
+  pushToast({ tone: "human", text: res.unchanged ? "內容沒有變更" : "已儲存到 Loom" });
+  await renderSoul();
+});
+const doSoulCompile = guard(async function () {
+  if (soulDirty()) { pushToast({ tone: "err", text: "有未儲存的編輯，請先「儲存到 Loom」" }); return; }
+  const res = await api.post("/soul/compile", {});
+  pushToast({ tone: "human", text: "已編譯到 " + res.path + (res.backup ? "（已備份原檔）" : "") });
+  await renderSoul();
+});
+
 // ───────────────────────── boot ─────────────────────────
 function boot() {
   try { if (localStorage.getItem("loom-theme") === "dark") document.body.classList.add("dark"); } catch {}
@@ -798,9 +899,11 @@ function boot() {
   const app = el("div", { class: "loom-app" });
   D.detail = el("div", { style: { flex: "1", overflow: "hidden", background: "var(--bg)", display: "flex", flexDirection: "column", minHeight: "0" } });
   D.toasts = el("div", { class: "loom-toasts" });
+  D.inspectorBody = el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, buildRail(), D.detail);
+  D.soulBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   app.append(
     buildHeader(),
-    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, buildRail(), D.detail),
+    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody),
     D.toasts);
   root.replaceChildren(app);
   loadRecords().catch((e) => {
