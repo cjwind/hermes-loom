@@ -144,12 +144,16 @@ def h_record_delete(ledger, params, query, body):
 
 @route("POST", r"/api/records/add")
 def h_record_add(ledger, params, query, body):
-    """Append a memory/user entry (used to undo a delete)."""
+    """Re-add an entry (used to undo a delete). store_type memory/user → file;
+    'hold' → re-park in HOLD."""
     try:
         from . import overrides as _ov
         store = body.get("store_type") or body.get("target_type") or "memory"
-        store = "user" if store == "user" else "memory"
-        res = _ov.add_memory_entry(ledger, store, body["text"], reason=body.get("reason"))
+        if store == "hold":
+            res = _ov.rehold_entry(ledger, body["text"], from_store=body.get("from_store"))
+        else:
+            store = "user" if store == "user" else "memory"
+            res = _ov.add_memory_entry(ledger, store, body["text"], reason=body.get("reason"))
         return 200, {"ok": True, **res}
     except (KeyError, OverrideError) as e:
         return 400, {"ok": False, "error": str(e)}

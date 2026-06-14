@@ -200,7 +200,7 @@ const doDelete = guard(async function (r) {
     tone: "del",
     text: "已刪除「" + val.slice(0, 14) + (val.length > 14 ? "…" : "") + "」" + (canUndo ? "" : "（技能已停用，檔案已備份）"),
     onUndo: canUndo ? async () => {
-      await api.post("/records/add", { store_type: r.target_type, text: val }).catch(() => {});
+      await api.post("/records/add", { store_type: r.target_type, text: val, from_store: r.from_store }).catch(() => {});
       await loadRecords((x) => x.target_type === r.target_type && activeValue(x) === val);
     } : undefined,
   });
@@ -221,8 +221,9 @@ const doPin = guard(async function (r) {
   await loadRecords((x) => x.id === r.id);
 });
 
-// Change category = physically move the entry between MEMORY.md / USER.md.
-const CAT_FILE = { memory: "MEMORY.md", pref: "USER.md" };
+// Change category = physically move the entry. 記憶→MEMORY.md, 偏好→USER.md,
+// 暫存(hold)→Loom-only (removed from all files; not compiled).
+const CAT_FILE = { memory: "MEMORY.md", pref: "USER.md", hold: "不寫入任何檔案（暫存）" };
 const doRecat = guard(async function (r, toCat) {
   const fromCat = r.cat;
   S.mode = null;
@@ -231,7 +232,9 @@ const doRecat = guard(async function (r, toCat) {
   await loadRecords((x) => x.id === res.new_id);
   pushToast({
     tone: "human",
-    text: `已改分類為「${catLabel(toCat)}」，資料移到 ${CAT_FILE[toCat] || "?"}`,
+    text: toCat === "hold"
+      ? "已改為暫存，不會 compile 到任何檔案（已從原檔移除）"
+      : `已改分類為「${catLabel(toCat)}」，資料移到 ${CAT_FILE[toCat] || "?"}`,
     onUndo: async () => {
       await api.post("/records/recategorize",
         { target_type: res.to_target_type, target_key: res.new_key, to_cat: fromCat }).catch(() => {});
@@ -568,10 +571,10 @@ function enterAnno(r) {
   if (D.annoTa) D.annoTa.focus();
 }
 function recatComposer(r) {
-  const movable = S.cats.filter((c) => c.k === "memory" || c.k === "pref");
+  const movable = S.cats.filter((c) => c.k === "memory" || c.k === "pref" || c.k === "hold");
   return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
     el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "10px" }, html:
-      "改分類會把這條<b style='color:var(--text)'>實際搬移</b>到對應檔案（記憶→MEMORY.md、偏好→USER.md），並先自動備份。" }),
+      "改分類會把這條<b style='color:var(--text)'>實際搬移</b>：記憶→MEMORY.md、偏好→USER.md、暫存→只留在 Loom（不寫入任何檔案、compile 不會輸出）。皆先自動備份。" }),
     el("div", { style: { display: "flex", gap: "7px", flexWrap: "wrap" } },
       ...movable.map((c) => {
         const cur = c.k === r.cat;
@@ -583,7 +586,7 @@ function recatComposer(r) {
             color: cur ? "var(--accent-ink)" : "var(--text)", opacity: cur ? ".7" : "1" },
           onclick: cur ? null : () => doRecat(r, c.k),
         },
-          el("span", { style: { width: "7px", height: "7px", borderRadius: "2px", background: "var(--cat-" + c.k + ")", display: "inline-block", marginRight: "6px" } }),
+          el("span", { style: { width: "7px", height: "7px", borderRadius: c.k === "hold" ? "50%" : "2px", background: "var(--cat-" + c.k + ")", display: "inline-block", marginRight: "6px" } }),
           c.label + (cur ? " · 目前" : " → " + (CAT_FILE[c.k] || "")));
       })),
     el("div", { style: { display: "flex", marginTop: "11px" } },

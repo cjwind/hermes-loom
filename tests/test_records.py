@@ -15,11 +15,11 @@ class TestRecords(LoomTestCase):
         obs.on_memory_write("add", "user", "User uses NixOS.", capture_window=False)
         return led
 
-    def test_only_three_categories(self):
+    def test_categories(self):
         led = self._seed()
         out = service.build_records(led)
         keys = sorted(c["k"] for c in out["cats"])
-        self.assertEqual(keys, ["memory", "pref", "skill"])
+        self.assertEqual(keys, ["hold", "memory", "pref", "skill"])
 
     def test_legacy_category_coerced(self):
         led = self._seed()

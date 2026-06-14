@@ -110,6 +110,18 @@ CREATE TABLE IF NOT EXISTS loom_meta (
     value TEXT
 );
 
+-- HOLD: entries parked in Loom only (not in any Hermes file), so they are NOT
+-- compiled to MEMORY.md/USER.md. Recategorizing to 暫存 removes the entry from
+-- its file and stores it here; moving it back re-inserts it into a file.
+CREATE TABLE IF NOT EXISTS held_entries (
+    key TEXT PRIMARY KEY,           -- entry_key(text)
+    text TEXT NOT NULL,
+    from_store TEXT,                -- 'memory' | 'user' (where it came from)
+    held_at REAL NOT NULL,
+    source_session_id TEXT,
+    metadata_json TEXT
+);
+
 -- Per-record UI/tuning state for the Inspector: pin, reclassify, annotation.
 -- Keyed by (target_type, target_key). Best-effort: memory keys are content
 -- hashes, so pins/notes are re-anchored on the new key after an edit.
@@ -397,6 +409,30 @@ class Ledger:
     def all_record_states(self) -> dict:
         rows = self.conn.execute("SELECT * FROM record_state").fetchall()
         return {(r["target_type"], r["target_key"]): dict(r) for r in rows}
+
+    # -- held (HOLD) entries — Loom-only, never compiled --------------------
+    def add_held(self, key: str, text: str, from_store: Optional[str] = None,
+                 source_session_id: Optional[str] = None, held_at: Optional[float] = None) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO held_entries(key,text,from_store,held_at,source_session_id) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET text=excluded.text, "
+                "from_store=excluded.from_store, held_at=excluded.held_at",
+                (key, text, from_store, held_at or _now(), source_session_id))
+            self.conn.commit()
+
+    def get_held(self, key: str) -> Optional[dict]:
+        row = self.conn.execute("SELECT * FROM held_entries WHERE key=?", (key,)).fetchone()
+        return dict(row) if row else None
+
+    def list_held(self) -> list[dict]:
+        return [dict(r) for r in self.conn.execute(
+            "SELECT * FROM held_entries ORDER BY held_at DESC").fetchall()]
+
+    def delete_held(self, key: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM held_entries WHERE key=?", (key,))
+            self.conn.commit()
 
 
 def _row_to_event(row: sqlite3.Row) -> dict:

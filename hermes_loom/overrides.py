@@ -295,6 +295,138 @@ def move_memory_entry(
             "backups": [str(src_backup)] + ([str(dst_backup)] if dst_backup else [])}
 
 
+def hold_entry(ledger: Ledger, from_store: str, entry_key: str,
+               *, reason: Optional[str] = None, applied_by: str = "loom-ui") -> dict:
+    """Park a memory/user entry in HOLD: remove it from its file and store it in
+    Loom only. compile won't emit it (it's no longer in any file)."""
+    from .memory_parser import entry_key as _ekey
+    if from_store not in ("memory", "user"):
+        raise OverrideError("only memory/user entries can be held")
+    src = _memory_path(from_store)
+    if not src.exists():
+        raise OverrideError(f"{from_store} file does not exist: {src}")
+    content = src.read_text(encoding="utf-8")
+    entries = parse_entries(content)
+    target = next((e for e in entries if e["key"] == entry_key), None)
+    if target is None:
+        raise OverrideError(f"entry {entry_key} not found in {from_store}")
+    text = target["text"]
+    from_tt = "user" if from_store == "user" else "memory"
+
+    ledger.add_memory_snapshot(from_store, content, _sha(content))
+    backup = _backup_file(src)
+    try:
+        _atomic_write(src, serialize_entries([e for e in entries if e["key"] != entry_key]))
+    except OSError as e:
+        raise OverrideError(f"failed to update {src}: {e}") from e
+
+    held_key = _ekey(text)
+    ledger.add_held(held_key, text, from_store=from_store)
+    ledger.add_override(target_type="hold", target_key=held_key, override_type="reclassify",
+                        before_text=f"[{from_tt}] {text}", after_text=f"[hold] {text}",
+                        reason=reason, applied_by=applied_by)
+    eid = ledger.add_event(
+        kind="memory_removed", target_type=from_tt, action="hold_out",
+        target_key=entry_key, target_path=str(src), before_text=text,
+        source_hint="manual_override", tool_name="loom", status="edited",
+        metadata={"manual": True, "moved_to": "hold", "backup": str(backup), "reason": reason})
+    nc = src.read_text(encoding="utf-8")
+    ledger.add_memory_snapshot(from_store, nc, _sha(nc), source_event_id=eid)
+    return {"held_key": held_key, "to_target_type": "hold", "new_key": held_key,
+            "text": text, "from_store": from_store, "backups": [str(backup)]}
+
+
+def unhold_entry(ledger: Ledger, held_key: str, to_store: str,
+                 *, reason: Optional[str] = None, applied_by: str = "loom-ui") -> dict:
+    """Move a held entry back into a file (MEMORY.md or USER.md)."""
+    from .memory_parser import entry_key as _ekey
+    if to_store not in ("memory", "user"):
+        raise OverrideError("HOLD can only move back to memory/user")
+    h = ledger.get_held(held_key)
+    if not h:
+        raise OverrideError(f"held entry {held_key} not found")
+    text = h["text"]
+    dst = _memory_path(to_store)
+    dst_content = dst.read_text(encoding="utf-8") if dst.exists() else ""
+    dst_entries = parse_entries(dst_content)
+    new_key = _ekey(text)
+    if any(e["key"] == new_key for e in dst_entries):
+        raise OverrideError("an identical entry already exists in the destination")
+
+    ledger.add_memory_snapshot(to_store, dst_content, _sha(dst_content))
+    backup = _backup_file(dst) if dst.exists() else None
+    to_tt = "user" if to_store == "user" else "memory"
+    try:
+        dst_entries.append({"key": new_key, "text": text})
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(dst, serialize_entries(dst_entries))
+    except OSError as e:
+        raise OverrideError(f"failed to update {dst}: {e}") from e
+
+    ledger.delete_held(held_key)
+    ledger.add_override(target_type=to_tt, target_key=new_key, override_type="reclassify",
+                        before_text=f"[hold] {text}", after_text=f"[{to_tt}] {text}",
+                        reason=reason, applied_by=applied_by)
+    eid = ledger.add_event(
+        kind="memory_added", target_type=to_tt, action="unhold_in",
+        target_key=new_key, target_path=str(dst), after_text=text,
+        source_hint="manual_override", tool_name="loom", status="edited",
+        metadata={"manual": True, "moved_from": "hold", "backup": str(backup) if backup else None, "reason": reason})
+    nc = dst.read_text(encoding="utf-8")
+    ledger.add_memory_snapshot(to_store, nc, _sha(nc), source_event_id=eid)
+    return {"new_key": new_key, "to_target_type": to_tt, "text": text,
+            "backups": [str(backup)] if backup else []}
+
+
+def edit_held(ledger: Ledger, held_key: str, new_text: str,
+              *, reason: Optional[str] = None, applied_by: str = "loom-ui") -> dict:
+    """Edit a held entry's text (stays in HOLD)."""
+    from .memory_parser import entry_key as _ekey
+    h = ledger.get_held(held_key)
+    if not h:
+        raise OverrideError(f"held entry {held_key} not found")
+    new_text = (new_text or "").strip()
+    if not new_text:
+        raise OverrideError("new text is empty")
+    new_key = _ekey(new_text)
+    ledger.delete_held(held_key)
+    ledger.add_held(new_key, new_text, from_store=h.get("from_store"))
+    ledger.add_override(target_type="hold", target_key=new_key, override_type="edit",
+                        before_text=h["text"], after_text=new_text, reason=reason, applied_by=applied_by)
+    ledger.add_event(kind="memory_replaced", target_type="memory", action="hold_edit",
+                     target_key=new_key, before_text=h["text"], after_text=new_text,
+                     source_hint="manual_override", tool_name="loom", status="edited",
+                     metadata={"manual": True, "hold": True, "reason": reason})
+    return {"new_key": new_key, "after": new_text}
+
+
+def delete_held(ledger: Ledger, held_key: str, *, reason: Optional[str] = None,
+                applied_by: str = "loom-ui") -> dict:
+    """Discard a held entry entirely."""
+    h = ledger.get_held(held_key)
+    if not h:
+        raise OverrideError(f"held entry {held_key} not found")
+    ledger.delete_held(held_key)
+    ledger.add_override(target_type="hold", target_key=held_key, override_type="delete",
+                        before_text=h["text"], after_text=None, reason=reason, applied_by=applied_by)
+    ledger.add_event(kind="memory_removed", target_type="memory", action="hold_delete",
+                     target_key=held_key, before_text=h["text"],
+                     source_hint="manual_override", tool_name="loom", status="edited",
+                     metadata={"manual": True, "hold": True, "reason": reason})
+    return {"text": h["text"], "from_store": h.get("from_store")}
+
+
+def rehold_entry(ledger: Ledger, text: str, from_store: Optional[str] = None) -> dict:
+    """Re-create a held entry (used to undo a HOLD delete)."""
+    from .memory_parser import entry_key as _ekey
+    text = (text or "").strip()
+    if not text:
+        raise OverrideError("text is empty")
+    key = _ekey(text)
+    ledger.add_held(key, text, from_store=from_store)
+    return {"held_key": key}
+
+
 def annotate_record(ledger: Ledger, target_type: str, target_key: str,
                     text: str, *, applied_by: str = "loom-ui") -> dict:
     """Attach (or clear, if empty) a private note to a record.

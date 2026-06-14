@@ -293,10 +293,31 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
     return rec
 
 
-# Loom uses three categories only: 記憶 / 技能 / 偏好, derived from the source
-# store (memory store → 記憶, user store → 偏好, skills → 技能). Hermes itself has
-# no categories; this is a fixed Loom-side label (manual reclassify was removed).
-_CAT_LABELS = {"memory": "記憶", "skill": "技能", "pref": "偏好"}
+# Loom categories: 記憶→MEMORY.md, 偏好→USER.md, 技能→skills, 暫存(HOLD)→Loom-only
+# (not compiled to any file). Hermes itself has no categories; these are Loom-side.
+_CAT_LABELS = {"memory": "記憶", "skill": "技能", "pref": "偏好", "hold": "暫存"}
+
+
+def _build_held_record(h: dict, states: dict) -> dict:
+    """Build a Record for a HOLD (Loom-only) entry."""
+    key, text = h["key"], h["text"]
+    st = _state(states, "hold", key)
+    from_label = {"memory": "MEMORY.md", "user": "USER.md"}.get(h.get("from_store"), "?")
+    return {
+        "id": f"hold:{key}", "target_type": "hold", "target_key": key, "cat": "hold",
+        "detail": f"暫存中 · 原本在 {from_label} · compile 不會輸出到任何檔案",
+        "conf": 2, "when": _rel_time(h.get("held_at")),
+        "originId": "—", "origin": "loom", "session_id": h.get("source_session_id"),
+        "raw": {"who": "你", "parts": ["（暫存項目，尚未決定要放 MEMORY 還是 USER）"]},
+        "ts": h.get("held_at") or 0,
+        "active": 0,
+        "versions": [{"v": "v1", "kind": "human", "who": "你暫存的", "when": _rel_time(h.get("held_at")), "value": text}],
+        "pinned": bool(st.get("pinned")),
+        "annotation": ({"text": st["annotation"], "when": _rel_time(st.get("annotation_at"))}
+                       if st.get("annotation") else None),
+        "from_store": h.get("from_store"),
+        "held": True,
+    }
 
 
 def _tag_skill_origin(rec: dict, skill: dict) -> dict:
@@ -328,6 +349,9 @@ def build_records(ledger: Ledger) -> dict:
                             fallback_ts=s.get("mtime", 0.0))
         records.append(_tag_skill_origin(rec, s))
 
+    for h in ledger.list_held():
+        records.append(_build_held_record(h, states))
+
     # Newest first. The rail claims "依時間", so order really is by ts desc.
     records.sort(key=lambda r: r.get("ts") or 0, reverse=True)
 
@@ -354,6 +378,9 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
                             detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
                             skill_content=full["content"])
         return _tag_skill_origin(rec, full)
+    if target_type == "hold":
+        h = ledger.get_held(key)
+        return _build_held_record(h, states) if h else None
     return None
 
 
@@ -364,6 +391,8 @@ def record_edit(ledger: Ledger, target_type: str, key: str, new_value: str, reas
         return overrides.edit_memory_entry(ledger, target_type, key, new_value, reason=reason)
     if target_type == "skill":
         return overrides.edit_skill(ledger, key, new_value, reason=reason)
+    if target_type == "hold":
+        return overrides.edit_held(ledger, key, new_value, reason=reason)
     raise overrides.OverrideError(f"unknown target_type {target_type}")
 
 
@@ -372,17 +401,23 @@ _CAT_TO_STORE = {"memory": "memory", "pref": "user"}
 
 
 def record_recategorize(ledger: Ledger, target_type: str, key: str, to_cat: str, reason=None):
-    """Move a memory/user entry to the file matching the new category.
-
-    記憶(memory)→MEMORY.md, 偏好(pref)→USER.md. Skills can't be recategorized.
-    Returns the move result plus the record's new id (target_type:new_key).
+    """Recategorize a memory/user/hold entry. Category controls where it lives:
+    記憶→MEMORY.md, 偏好→USER.md, 暫存(hold)→Loom-only (not compiled). Skills can't
+    be recategorized. Returns the move result + the record's new id.
     """
-    if target_type not in ("memory", "user"):
-        raise overrides.OverrideError("只有記憶/偏好可以改分類（技能不適用）")
-    to_store = _CAT_TO_STORE.get(to_cat)
-    if to_store is None:
-        raise overrides.OverrideError(f"無法把記憶/偏好改成「{to_cat}」")
-    res = overrides.move_memory_entry(ledger, target_type, key, to_store, reason=reason)
+    if target_type not in ("memory", "user", "hold"):
+        raise overrides.OverrideError("只有記憶/偏好/暫存可以改分類（技能不適用）")
+    if to_cat not in ("memory", "pref", "hold"):
+        raise overrides.OverrideError(f"無法改成「{to_cat}」")
+
+    if target_type == "hold":
+        if to_cat == "hold":
+            raise overrides.OverrideError("已經是暫存了")
+        res = overrides.unhold_entry(ledger, key, _CAT_TO_STORE[to_cat], reason=reason)
+    elif to_cat == "hold":
+        res = overrides.hold_entry(ledger, target_type, key, reason=reason)
+    else:
+        res = overrides.move_memory_entry(ledger, target_type, key, _CAT_TO_STORE[to_cat], reason=reason)
     res["new_id"] = f"{res['to_target_type']}:{res['new_key']}"
     return res
 
@@ -392,4 +427,6 @@ def record_delete(ledger: Ledger, target_type: str, key: str, reason=None):
         return overrides.delete_memory_entry(ledger, target_type, key, reason=reason)
     if target_type == "skill":
         return overrides.delete_skill(ledger, key, hard=False, reason=reason)
+    if target_type == "hold":
+        return overrides.delete_held(ledger, key, reason=reason)
     raise overrides.OverrideError(f"unknown target_type {target_type}")

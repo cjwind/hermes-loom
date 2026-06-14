@@ -289,10 +289,13 @@ the latest state (even changes Loom hadn't observed yet). The implicit sync is
 skipped when `--as-of` is given (you explicitly want a past state) or with
 `--no-sync`.
 
-Category controls where an entry lives: **記憶 → MEMORY.md, 偏好 → USER.md**.
-Recategorizing a record (UI「改分類」or `POST /records/recategorize`) physically
-moves the entry between those files immediately (with snapshot + backup), so it
-compiles to the new location.
+Category controls where an entry lives: **記憶 → MEMORY.md, 偏好 → USER.md, 暫存
+(HOLD) → Loom-only**. Recategorizing a record (UI「改分類」or
+`POST /records/recategorize`) physically moves the entry immediately (with
+snapshot + backup), so it compiles to the new location. **暫存 (HOLD)** is for
+entries you haven't decided about yet: the entry is removed from all Hermes files
+and parked in Loom's ledger, so **compile never emits it** until you move it back
+to 記憶/偏好.
 
 Default output is a **dir** (`memories/` + `skills/` tree, never modifies
 `~/.hermes`). `--in-place` overwrites the live files, taking a timestamped backup
