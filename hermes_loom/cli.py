@@ -94,6 +94,7 @@ def _cmd_serve(args):
 
 def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    config.load_hermes_dotenv()   # pick up LOOM_LLM_* etc. from ~/.hermes/.env
     p = argparse.ArgumentParser(prog="hermes-loom")
     sub = p.add_subparsers(dest="cmd", required=True)
 

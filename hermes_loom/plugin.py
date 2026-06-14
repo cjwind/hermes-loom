@@ -157,6 +157,11 @@ class LoomPlugin:
 
 def register(ctx):
     """Hermes plugin entrypoint. Binds the real hooks; degrades if absent."""
+    try:
+        from . import config
+        config.load_hermes_dotenv()   # ensure LOOM_LLM_* from ~/.hermes/.env are present
+    except Exception:  # noqa: BLE001
+        pass
     plugin = LoomPlugin()
     bound = []
 

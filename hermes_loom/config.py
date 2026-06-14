@@ -74,3 +74,33 @@ MEMORY_ENTRY_SEPARATOR = "§"  # § on its own line
 
 def ui_dir() -> Path:
     return Path(__file__).resolve().parent.parent / "ui"
+
+
+def load_hermes_dotenv() -> int:
+    """Load ``~/.hermes/.env`` into os.environ (stdlib, no python-dotenv).
+
+    So Loom's own `serve`/CLI see the same vars (e.g. LOOM_LLM_*) that the Hermes
+    gateway already loads for the plugin. Existing env vars are NOT overridden, so
+    an explicit export still wins. Best-effort: never raises.
+    """
+    import os
+    path = hermes_home() / ".env"
+    if not path.exists():
+        return 0
+    loaded = 0
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[7:]
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = val
+                loaded += 1
+    except OSError:
+        pass
+    return loaded
