@@ -91,6 +91,11 @@ def h_memory(ledger, params, query, body):
 
 # ---- Inspector records --------------------------------------------------
 
+@route("GET", r"/api/status")
+def h_status(ledger, params, query, body):
+    return 200, service.auto_deposit_status(ledger)
+
+
 @route("GET", r"/api/records")
 def h_records(ledger, params, query, body):
     return 200, service.build_records(ledger)

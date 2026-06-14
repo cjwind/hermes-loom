@@ -10,6 +10,7 @@ All DB access opens ``state.db`` read-only so Loom can never corrupt Hermes.
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from pathlib import Path
 from typing import List, Optional
@@ -145,6 +146,62 @@ def get_session_meta(session_id: str) -> Optional[dict]:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+PLUGIN_NAME = "hermes-loom"
+
+
+def _plugins_lists() -> dict:
+    """Parse the ``plugins: {enabled: [...], disabled: [...]}`` block from
+    config.yaml without a YAML dependency. Returns {'enabled': set, 'disabled': set}.
+    """
+    cfg = config.hermes_home() / "config.yaml"
+    out = {"enabled": set(), "disabled": set()}
+    if not cfg.exists():
+        return out
+    try:
+        lines = cfg.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    in_plugins = False
+    cur = None
+    for line in lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            in_plugins = line.startswith("plugins:")
+            cur = None
+            continue
+        if not in_plugins:
+            continue
+        stripped = line.strip()
+        if stripped in ("enabled:", "disabled:"):
+            cur = stripped[:-1]
+        elif stripped.startswith("- ") and cur:
+            out[cur].add(stripped[2:].strip())
+    return out
+
+
+def plugin_status() -> dict:
+    """Is the Loom plugin installed + enabled (per Hermes' own config)?"""
+    installed = (config.skills_dir().parent / "plugins" / PLUGIN_NAME / "plugin.yaml").exists()
+    lists = _plugins_lists()
+    enabled = (PLUGIN_NAME in lists["enabled"]) and (PLUGIN_NAME not in lists["disabled"])
+    return {"installed": installed, "enabled": enabled}
+
+
+def gateway_status() -> dict:
+    """Is the Hermes gateway (which performs auto-deposit) running?"""
+    path = config.hermes_home() / "gateway_state.json"
+    if not path.exists():
+        return {"known": False, "running": False}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return {"known": True, "running": data.get("gateway_state") == "running",
+                "updated_at": data.get("updated_at")}
+    except (OSError, json.JSONDecodeError):
+        return {"known": False, "running": False}
 
 
 def get_session_context(session_id: str, limit: int = 12) -> dict:

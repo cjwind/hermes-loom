@@ -98,6 +98,45 @@ def skill_detail(ledger: Ledger, name: str) -> Optional[dict]:
     }
 
 
+def auto_deposit_status(ledger: Ledger) -> dict:
+    """Real status for the header pill: is Hermes' auto-deposit observable?
+
+    Combines three signals:
+      * plugin installed + enabled (from Hermes' own config.yaml)
+      * gateway running (gateway_state.json) — Hermes' auto-deposit needs it
+      * recent live observation (a plugin_hook event in the ledger)
+
+    state ∈ {live, enabled, offline}:
+      * live    — gateway running AND plugin enabled
+      * enabled — plugin enabled but gateway not confirmed running
+      * offline — plugin not installed/enabled
+    """
+    plug = hermes_state.plugin_status()
+    gw = hermes_state.gateway_status()
+    last_hook = ledger.conn.execute(
+        "SELECT timestamp FROM growth_events WHERE source_hint='plugin_hook' "
+        "ORDER BY timestamp DESC LIMIT 1"
+    ).fetchone()
+    last_hook_ts = last_hook[0] if last_hook else None
+
+    if plug["installed"] and plug["enabled"]:
+        state = "live" if gw["running"] else "enabled"
+    else:
+        state = "offline"
+
+    label = {
+        "live": "自動沉澱進行中",
+        "enabled": "plugin 已啟用，等待沉澱",
+        "offline": "plugin 未啟用",
+    }[state]
+    return {
+        "state": state, "label": label,
+        "plugin": plug, "gateway": gw,
+        "last_plugin_hook": last_hook_ts,
+        "last_plugin_hook_rel": _rel_time(last_hook_ts) if last_hook_ts else None,
+    }
+
+
 def session_context(ledger: Ledger, session_id: str, limit: int = 20) -> dict:
     ctx = hermes_state.get_session_context(session_id, limit=limit)
     ctx["events"] = [_event_summary(e) for e in ledger.query_events(session_id=session_id, limit=100)]

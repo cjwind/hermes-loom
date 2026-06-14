@@ -236,13 +236,33 @@ function buildHeader() {
   D.stats = stats;
   const themeBtn = el("button", { class: "loom-btn", onclick: toggleTheme });
   D.themeBtn = themeBtn; paintThemeBtn();
+  const pill = el("span", { class: "loom-pill" }, el("span", { class: "loom-dot" }), "檢查狀態中…");
+  D.pill = pill;
   return el("div", { class: "loom-top" },
     el("div", { class: "loom-brand" },
       el("div", { class: "loom-logo" }),
       el("div", { class: "loom-name", html: 'Hermes Loom <span class="sub">/ 檢視台</span>' })),
-    el("span", { class: "loom-pill" }, el("span", { class: "loom-dot loom-live" }), "自動沉澱進行中"),
+    pill,
     el("div", { class: "loom-top-spacer" }),
     stats, themeBtn);
+}
+
+// Reflect real auto-deposit status (plugin enabled + gateway running + recent hook).
+const PILL_COLOR = { live: "var(--cat-fact)", enabled: "var(--human)", offline: "var(--text-4)" };
+async function refreshStatus() {
+  if (!D.pill) return;
+  try {
+    const s = await api.get("/status");
+    const dot = el("span", { class: "loom-dot" + (s.state === "live" ? " loom-live" : ""), style: { background: PILL_COLOR[s.state] || "var(--text-4)" } });
+    let tip = `plugin：${s.plugin.installed ? (s.plugin.enabled ? "已啟用" : "已安裝但停用") : "未安裝"}`;
+    tip += ` · gateway：${s.gateway.known ? (s.gateway.running ? "運作中" : "未運作") : "未知"}`;
+    tip += s.last_plugin_hook_rel ? ` · 最近即時觀測：${s.last_plugin_hook_rel}` : " · 尚無即時觀測";
+    D.pill.replaceChildren(dot, document.createTextNode(s.label));
+    D.pill.setAttribute("title", tip);
+  } catch (e) {
+    D.pill.replaceChildren(el("span", { class: "loom-dot", style: { background: "var(--text-4)" } }), document.createTextNode("狀態未知"));
+    D.pill.setAttribute("title", "無法取得狀態：" + e.message);
+  }
 }
 function renderStats() {
   const live = S.records.length;
@@ -598,5 +618,7 @@ function boot() {
   loadRecords().catch((e) => {
     D.detail.replaceChildren(el("div", { class: "loom-empty" }, el("div", { style: { color: "var(--del)" } }, "載入失敗：" + e.message)));
   });
+  refreshStatus();
+  setInterval(refreshStatus, 30000); // keep the pill honest as gateway/plugin state changes
 }
 boot();
