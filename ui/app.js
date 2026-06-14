@@ -1046,10 +1046,12 @@ function paintPackList() {
       (p.tags || []).length ? el("div", { style: { display: "flex", gap: "4px", flexWrap: "wrap", margin: "4px 0 0 12px" } }, ...packTagChips(p.tags.slice(0, 4), { height: "15px", fontSize: "9px" })) : null,
       el("div", { class: "loom-meta", style: { fontSize: "10.5px", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, (p.content || "").slice(0, 50)));
   });
-  D.packList.replaceChildren(add,
+  D.packList.replaceChildren(...[
+    add,
     el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "2px 12px 6px" } }, S.packs.length + " 個 pack"),
     ...rows,
-    !S.packs.length ? el("div", { class: "loom-meta", style: { padding: "14px", fontSize: "11.5px", lineHeight: "1.6" } }, "還沒有 pack。新增一個：給它標題與標籤，對話時 Loom 會依你的訊息選相關的 pack 注入。") : null);
+    S.packs.length ? null : el("div", { class: "loom-meta", style: { padding: "14px", fontSize: "11.5px", lineHeight: "1.6" } }, "還沒有 pack。新增一個：給它標題與標籤，對話時 Loom 會依你的訊息選相關的 pack 注入。"),
+  ].filter(Boolean));
 }
 function renderPackDetail() {
   const host = D.packDetail;
