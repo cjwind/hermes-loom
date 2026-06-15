@@ -476,7 +476,6 @@ function listRow(r) {
     el("span", { style: { flex: "1", minWidth: "0" } },
       el("span", { style: { display: "-webkit-box", WebkitLineClamp: "2", WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: "12.5px", fontWeight: sel ? "600" : "500", color: sel ? "var(--text)" : "var(--text-2)", lineHeight: "1.4" } }, activeValue(r)),
       el("span", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" } },
-        provChip(r.provenance),
         el("span", { class: "loom-meta", style: { fontSize: "10.5px" } }, whenText(r)),
         r.pinned && icon("pin", { s: 10, color: "var(--accent)" }),
         isTouched(r) && el("span", { title: tr("tag.humanEdited"), style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } }))));
@@ -787,9 +786,9 @@ function provEvidence(p) {
 function pipeline(r) {
   const vs = r.versions, stored = vs[r.active];
 
-  // Section A (source-trace / provenance card) is intentionally not rendered in
-  // the detail for now — the rail still shows a provChip, and the backend trace
-  // + helpers (provBadge/provEvidence/_source_trace) stay so it can return.
+  // The source-trace UI (the detail's Section A card and the rail's provChip)
+  // is intentionally not rendered for now. The backend trace + helpers
+  // (provBadge/provEvidence/provChip/_source_trace) stay so it can return.
 
   // ── Section B — Hermes 沉澱的內容 ──
   let sectionB;
