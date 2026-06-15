@@ -20,45 +20,50 @@ Loom is built for people who want long-running agents to be understandable and c
 
 ### Requirements
 
-- Docker (with the Compose plugin) — that's it; the image is fully self-contained.
+- Docker (with the Compose plugin)
 - A local Hermes install (defaults to `~/.hermes`)
 
-### Install & Usage
+### Get started
 
 ```bash
 git clone https://gitlab.com/cjwind/hermes-loom.git
 cd hermes-loom
 
+# run the container as you, not root
 export UID="$(id -u)" GID="$(id -g)"
+# Loom's data dir (avoids a root-owned mount)
 mkdir -p ~/.hermes-loom
 
-# Install into the local ~/.hermes (run on the host, not in the container)
+# copies the plugin into ~/.hermes/plugins, then enable + restart Hermes
 scripts/install-plugin.sh
 
 docker compose build
-
-# Seed the ledger: import current memory & skills as a baseline snapshot
-docker compose run --rm loom bootstrap
-# Backfill past growth events from state.db (precise provenance)
-docker compose run --rm loom ingest
-# Full refresh in one shot (bootstrap + ingest + snapshot-diff fallback)
-docker compose run --rm loom sync
-
-# Start the local UI / API on http://127.0.0.1:8765
-docker compose up -d
+docker compose run --rm loom sync       # import current memory/skills + backfill history
+docker compose up -d                    # UI at http://127.0.0.1:8765
 ```
 
-### Configuration (environment variables)
+That's it — open <http://127.0.0.1:8765>. Stop with `docker compose down`.
 
-All paths are resolved from environment variables (Loom also auto-loads `$HERMES_HOME/.env`). With Docker, `HERMES_HOME` and `LOOM_HOME` are set to the in-container mount points (`/hermes`, `/loom`) by the image; you point them at host directories via the `volumes:` in `docker-compose.yml`:
+### Common commands
 
-| Variable | In-container value | Host directory (volume) | Description |
+Run any subcommand with `docker compose run --rm loom <cmd>`:
+
+| Command | What it does |
+| --- | --- |
+| `sync` | Refresh the ledger from current memory/skills + state.db history |
+| `status` | Show ledger path and event counts |
+| `compile --in-place` | Rebuild Hermes' MEMORY.md / USER.md / SKILL.md / SOUL.md from the ledger (backs up first) |
+
+### Configuration
+
+Both directories are mounted into the container by `docker-compose.yml`:
+
+| Variable | Default (host) | Mounted at | Purpose |
 | --- | --- | --- | --- |
-| `HERMES_HOME` | `/hermes` | `~/.hermes` (override with host `HERMES_HOME`) | Root of the Hermes native install |
-| `LOOM_HOME` | `/loom` | `~/.hermes-loom` (override with host `LOOM_HOME`) | Where Loom keeps its ledger + snapshots |
-| `LOOM_DB` | `$LOOM_HOME/ledger.db` | — | Ledger database path |
+| `HERMES_HOME` | `~/.hermes` | `/hermes` | Your Hermes install |
+| `LOOM_HOME` | `~/.hermes-loom` | `/loom` | Loom's ledger + snapshots |
 
-To mount a Hermes install that lives elsewhere, set `HERMES_HOME` (and/or `LOOM_HOME`) in your host shell before `docker compose …` — Compose substitutes them into the volume paths.
+To point at a Hermes install elsewhere, set `HERMES_HOME` in your shell before `docker compose …`.
 
 ## License
 
