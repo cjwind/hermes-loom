@@ -175,7 +175,6 @@ async function loadRecords(prefer) {
     S.selId = vis.length ? vis[0].id : (S.records[0] && S.records[0].id) || null;
   }
   renderChips(); renderRailList(); renderDetail();
-  renderStats();
 }
 
 function visibleRecords() {
@@ -347,8 +346,6 @@ function touchedTag(human) {
 }
 // ───────────────────────── header ─────────────────────────
 function buildHeader() {
-  const stats = el("span", { class: "loom-meta", style: { marginRight: "4px" } });
-  D.stats = stats;
   const themeBtn = el("button", { class: "loom-btn", onclick: toggleTheme });
   D.themeBtn = themeBtn; paintThemeBtn();
   const langBtn = el("button", { class: "loom-btn", title: tr("lang.switchTitle"),
@@ -362,7 +359,7 @@ function buildHeader() {
     buildNav(),
     pill,
     el("div", { class: "loom-top-spacer" }),
-    stats, langBtn, themeBtn);
+    langBtn, themeBtn);
 }
 
 // Top-level view switcher: the Inspector (observed growth) vs the SOUL editor.
@@ -423,13 +420,6 @@ async function refreshStatus() {
     D.pill.replaceChildren(el("span", { class: "loom-dot", style: { background: "var(--text-4)" } }), document.createTextNode(tr("status.unknown")));
     D.pill.setAttribute("title", tr("status.fetchFailed", { msg: e.message }));
   }
-}
-function renderStats() {
-  const live = S.records.length;
-  const touched = S.records.filter(isTouched).length;
-  D.stats.replaceChildren(
-    document.createTextNode(tr("stats.total", { n: live })),
-    el("span", { style: { color: "var(--human)" } }, tr("stats.touched", { n: touched })));
 }
 function paintThemeBtn() {
   const dark = document.body.classList.contains("dark");

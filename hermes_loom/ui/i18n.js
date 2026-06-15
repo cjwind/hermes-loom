@@ -46,9 +46,6 @@
       "status.gwUnknown": "未知",
       "status.lastHook": " · 最近即時觀測：{rel}",
       "status.noHook": " · 尚無即時觀測",
-      // stats
-      "stats.total": "{n} 筆 · ",
-      "stats.touched": "{n} 筆你動過",
       // theme
       "theme.dark": "深色",
       "theme.light": "淺色",
@@ -300,8 +297,6 @@
       "status.gwUnknown": "unknown",
       "status.lastHook": " · last live observation: {rel}",
       "status.noHook": " · no live observation yet",
-      "stats.total": "{n} · ",
-      "stats.touched": "{n} edited by you",
       "theme.dark": "Dark",
       "theme.light": "Light",
       "cat.all": "All",
