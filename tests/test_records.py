@@ -87,6 +87,43 @@ class TestRecords(LoomTestCase):
         # underlying file really changed
         self.assertIn("oolong", (self.hermes_home / "memories" / "USER.md").read_text())
 
+    def test_memory_full_edit_chain(self):
+        # An entry edited several times (auto, then manually) should expose its
+        # WHOLE history in the detail view — not just current-vs-previous.
+        from hermes_loom import snapshot
+        self.write_memory("user", "User likes tea.")
+        led = self.ledger()
+        snapshot.bootstrap(led)
+        # two auto edits, each discovered by reconcile (which links prev_key)
+        self.write_memory("user", "User likes green tea.")
+        snapshot.reconcile_memory(led, "user")
+        self.write_memory("user", "User likes oolong tea.")
+        snapshot.reconcile_memory(led, "user")
+        # one manual edit on top
+        rec = next(r for r in service.build_records(led)["records"]
+                   if r["target_type"] == "user")
+        service.record_edit(led, "user", rec["target_key"], "User loves oolong tea.")
+
+        cur = next(r for r in service.build_records(led)["records"]
+                   if "loves" in r["versions"][r["active"]]["value"])
+        d = service.record_detail(led, cur["id"])
+        self.assertEqual([v["value"] for v in d["versions"]], [
+            "User likes tea.", "User likes green tea.",
+            "User likes oolong tea.", "User loves oolong tea.",
+        ])
+        self.assertEqual([v["v"] for v in d["versions"]], ["v1", "v2", "v3", "v4"])
+        self.assertEqual(d["versions"][-1]["kind"], "human")   # the manual edit
+        self.assertEqual(d["versions"][2]["kind"], "auto")     # an auto edit
+        self.assertEqual(d["active"], 3)                       # current = newest
+
+    def test_memory_unedited_entry_stays_single_version(self):
+        # No recorded edits → no synthetic chain; the record keeps its lone version.
+        led = self._seed()
+        rec = next(r for r in service.build_records(led)["records"]
+                   if "tea" in r["versions"][r["active"]]["value"])
+        d = service.record_detail(led, rec["id"])
+        self.assertEqual(len(d["versions"]), 1)
+
     def test_annotate_and_pin(self):
         led = self._seed()
         r = service.build_records(led)["records"][0]

@@ -745,10 +745,10 @@ function versionRow(r, ver, idx) {
       ? el("span", { class: "loom-meta", style: { color: "var(--accent-ink)", fontWeight: "600" } }, "目前生效")
       : el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 8px", fontSize: "11px", color: "var(--accent-ink)" }, onclick: () => doEdit(r, ver.value, { restored: true }) }, icon("undo", { s: 11 }), "還原此版"));
 }
-// skill version diff: two pickers (從 / 到) over the full content timeline,
-// rendered as a line-level diff that re-renders on selection change.
-function skillDiffView(r) {
-  const vs = r.skill_versions;
+// version diff: two pickers (從 / 到) over a full version timeline, rendered by
+// `render(a,b)` and re-rendered on selection change. Shared by skills (line-level
+// diff over a full SKILL.md) and memory/user entries (char-level diff).
+function versionDiffView(vs, render) {
   const selStyle = { fontFamily: "IBM Plex Mono, ui-monospace, monospace", fontSize: "11.5px",
     padding: "3px 6px", borderRadius: "6px", border: "1px solid var(--border)",
     background: "var(--surface)", color: "var(--text)" };
@@ -757,7 +757,7 @@ function skillDiffView(r) {
     ...vs.map((v, i) => el("option", { value: String(i), selected: i === cur ? "selected" : null }, label(v))));
   let bi = vs.length - 2, ti = vs.length - 1;
   const area = el("div", {});
-  const draw = () => area.replaceChildren(lineDiffEl(vs[bi].value, vs[ti].value));
+  const draw = () => area.replaceChildren(render(vs[bi].value, vs[ti].value));
   const bSel = mkSelect(bi, (i) => { bi = i; draw(); });
   const tSel = mkSelect(ti, (i) => { ti = i; draw(); });
   draw();
@@ -767,10 +767,13 @@ function skillDiffView(r) {
       el("span", { class: "loom-meta", style: { marginLeft: "2px" } }, vs.length + " 個版本")),
     area);
 }
+const skillDiffView = (r) => versionDiffView(r.skill_versions, lineDiffEl);
+// memory/user entries are short free text → char-level diff reads best.
+const memoryDiffView = (vs) => versionDiffView(vs, (a, b) =>
+  el("div", { style: { padding: "2px 0" } }, diffEl(a, b)));
 
 function pipeline(r) {
-  const vs = r.versions, stored = vs[r.active], prev = r.active > 0 ? vs[r.active - 1] : null;
-  const edited = vs.length > 1;
+  const vs = r.versions, stored = vs[r.active];
 
   // ── Section A — 來自這次對話 (provenance) ──
   const jumpBtn = r.session_id
@@ -810,15 +813,19 @@ function pipeline(r) {
       sectionHead("spark", "Hermes 沉澱的內容（SKILL.md）", rightCtl),
       area);
   } else {
-    const storedContent = prev
+    // ≥2 versions → full edit-chain diff picker (從→到 over every recorded
+    // state, auto + manual). Single version → just show the value.
+    const multi = vs.length > 1;
+    const hasHuman = vs.some((v) => v.kind === "human");
+    const storedContent = multi
       ? el("div", {},
-          el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html: "從 <span class='loom-mono'>" + prev.v + "</span> → <span class='loom-mono'>" + stored.v + "</span> 的變化：" }),
-          el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px" } }, diffEl(prev.value, stored.value)))
+          el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" } }, "這條記憶的歷次變化："),
+          el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px" } }, memoryDiffView(vs)))
       : el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 13px", background: "var(--surface)", fontSize: "14px", color: "var(--text)", lineHeight: "1.5" } }, stored.value);
     sectionB = el("div", {},
-      sectionHead("spark", edited ? "Hermes 沉澱的內容 · 含你的調整" : "Hermes 沉澱的內容"),
+      sectionHead("spark", hasHuman ? "Hermes 沉澱的內容 · 含你的調整" : "Hermes 沉澱的內容"),
       storedContent,
-      edited && el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
+      multi && el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
         el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, "版本歷史 · " + vs.length + " 版 · Hermes 的自動版本永遠保留"),
         ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
   }

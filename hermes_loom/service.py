@@ -402,6 +402,94 @@ def _skill_version_history(ledger: Ledger, name: str, current_content: str) -> l
     return history
 
 
+def _memory_version_history(
+    ledger: Ledger, target_type: str, key: str, current_value: str
+) -> list[dict]:
+    """Reconstruct a single memory/user entry's full edit chain, oldest→newest.
+
+    Memory entries are addressed by a content-hash key, so every edit changes the
+    key. Each ``memory_replaced`` event — whether an auto ``snapshot_diff`` or a
+    manual override — records ``metadata.prev_key`` linking the new key back to
+    the one it replaced, plus the before/after text. Following that chain
+    backwards from the current entry rebuilds every state it passed through,
+    giving memory the same full-history view skills already get from snapshots.
+
+    Returns ``{v,kind,who,when,value}`` dicts oldest→newest, or ``[]`` when the
+    entry has no recorded edits (the caller then keeps the single-version record).
+    """
+    events = ledger.query_events(target_type=target_type, limit=2000)  # newest first
+    by_key: dict = {}
+    for e in events:
+        by_key.setdefault(e["target_key"], []).append(e)
+
+    def _producing(k, val):
+        """The event that set value ``val`` under key ``k`` (prefer an exact
+        text match, else the newest event for that key)."""
+        cands = by_key.get(k, [])
+        return next((e for e in cands if e["after_text"] == val), None) or (cands[0] if cands else None)
+
+    cur = next((e for e in events
+                if e["target_key"] == key and e["after_text"] == current_value), None)
+    if cur is None:
+        cur = next((e for e in events if e["after_text"] == current_value), None)
+    if cur is None:
+        return []
+
+    chain: list[dict] = []  # events, newest→oldest
+    seen: set = set()
+    while cur is not None and cur["id"] not in seen:
+        seen.add(cur["id"])
+        chain.append(cur)
+        prev_key = (cur.get("metadata") or {}).get("prev_key")
+        prev_val = cur["before_text"]
+        if not prev_key and prev_val is None:
+            break
+        nxt = _producing(prev_key, prev_val) if prev_key else None
+        if nxt is None and prev_val is not None:
+            nxt = next((e for e in events if e["after_text"] == prev_val), None)
+        cur = nxt
+    chain.reverse()  # oldest→newest
+
+    def _ver(ev: dict, value: str) -> dict:
+        hint = ev["source_hint"]
+        human = (ev["action"] or "").startswith("manual") or hint == "manual_override"
+        return {"kind": "human" if human else "auto",
+                "who": "你的修改" if human else _HINT_LABEL.get(hint, "Hermes 自動沉澱"),
+                "when": _rel_time(ev["timestamp"]), "value": value}
+
+    versions: list[dict] = []
+    # The oldest event's before_text is a prior state with no owning event of its
+    # own (e.g. the value at bootstrap). Surface it as the first version, tagged
+    # from whichever event originally produced it, if any.
+    first = chain[0]
+    if first["before_text"]:
+        origin = _origin_event(ledger, target_type, first["before_text"])
+        versions.append({
+            "kind": "auto",
+            "who": (_HINT_LABEL.get(origin["source_hint"], "Hermes 自動沉澱")
+                    if origin else "Hermes 自動沉澱"),
+            "when": _rel_time(origin["timestamp"]) if origin else "",
+            "value": first["before_text"],
+        })
+    for ev in chain:
+        if ev["after_text"] is not None:
+            versions.append(_ver(ev, ev["after_text"]))
+
+    # Collapse consecutive identical values (keep the latest provenance for one).
+    collapsed: list[dict] = []
+    for v in versions:
+        if collapsed and collapsed[-1]["value"] == v["value"]:
+            collapsed[-1] = v
+            continue
+        collapsed.append(v)
+
+    if len(collapsed) < 2:
+        return []
+    for i, v in enumerate(collapsed):
+        v["v"] = f"v{i + 1}"
+    return collapsed
+
+
 def _tag_skill_origin(rec: dict, skill: dict) -> dict:
     """Attach origin classification (from the loader) onto a skill record."""
     rec["is_agent_created"] = skill.get("is_agent_created", False)
@@ -451,6 +539,17 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
         ent = next((e for e in parse_entries(content or "") if e["key"] == key), None)
         if ent:
             rec = _build_record(ledger, target_type, key, ent["text"], states)
+            # Detail view shows the entry's *full* edit chain (auto + manual),
+            # reconstructed from the prev_key links — not just current-vs-previous.
+            # Kept out of build_records (list view) to avoid a full event scan per
+            # entry; only the opened record pays for it.
+            hist = _memory_version_history(ledger, target_type, key, ent["text"])
+            if len(hist) >= 2:
+                rec["versions"] = hist
+                rec["active"] = next(
+                    (i for i, v in enumerate(hist) if v["value"] == ent["text"]),
+                    len(hist) - 1,
+                )
     elif target_type == "skill":
         full = hermes_state.read_skill(key)
         if full:
