@@ -1,5 +1,61 @@
 # Hermes Loom — Architecture & design notes
 
+Three clearly-separated layers (never mixed):
+
+```
+        ┌──────────────────────────── Hermes native state (owned by Hermes) ───────────────────────────┐
+        │  ~/.hermes/memories/*.md     ~/.hermes/skills/**/SKILL.md      ~/.hermes/state.db (sessions)  │
+        └───────▲─────────────────────────────▲───────────────────────────────────▲────────────────────┘
+                │ read+write (overrides only)  │ read-only                          │ read-only
+                │                              │                                    │
+   ┌────────────┴──────────┐        ┌──────────┴───────────┐            ┌───────────┴────────────┐
+   │  A. Hermes plugin     │  write │  B. Loom ledger      │   read     │  provenance / ingest   │
+   │  (live hooks)         ├───────►│  (append-only SQLite)│◄───────────┤  (state.db tool calls) │
+   │  observer.Observer    │        │  ledger.Ledger       │            └────────────────────────┘
+   └───────────────────────┘        └──────────▲───────────┘
+                                                │ read/write
+                                     ┌──────────┴───────────┐
+                                     │  C. Local API        │  stdlib http.server, JSON
+                                     │  hermes_loom.api     │
+                                     └──────────▲───────────┘
+                                                │ fetch()
+                                     ┌──────────┴───────────┐
+                                     │  D. Inspector UI     │  vanilla JS, design CSS (no build)
+                                     │  /ui/*               │
+                                     └──────────────────────┘
+```
+
+* **A. Hermes plugin** (`hermes_loom/plugin.py`) — observes memory/skill mutations
+  in real time and forwards them to the ledger via `observer.Observer`.
+* **B. Loom ledger** (`hermes_loom/ledger.py`) — the append-only record of *growth
+  events* (not just final state) + snapshots + overrides.
+* **C. Local API** (`hermes_loom/api.py`) — reads the ledger, the live memory/skill
+  files and session metadata for the UI; applies overrides.
+* **D. UI** (`ui/`) — the **檢視台 (Inspector)**: a single master–detail screen
+  (left list rail + right provenance pipeline) built to the Claude Design handoff.
+  Light/dark themes, character-level diff, version history, and inline
+  edit/delete/annotate/reclassify/pin with undo toasts. Vanilla JS, no build step;
+  reuses the design's authoritative `loom-theme.css` / `loom-proto.css`.
+
+## The three provenance tiers
+
+Provenance is recorded **at change-time where possible**, with graceful fallback:
+
+1. **`plugin_hook`** — live hook fires; we record the change with its session id
+   immediately. *Best, real-time.* Requires the plugin to be loaded by Hermes.
+2. **`statedb_ingest`** — offline backfill: Hermes records every `memory` tool
+   call in `state.db`, carrying `{action, target, content}` plus the exact
+   session + timestamp. We reconstruct precise events *and* a surrounding message
+   window. *Precise, works without the plugin* — this is what makes Loom useful
+   on day one against an existing install.
+3. **`snapshot_diff`** — coarse fallback: compare current files to the last
+   snapshot and infer add/replace/remove. Tagged `inferred=true`. *Best-effort.*
+
+> If hooks aren't precise enough, Loom does **not** block on perfect provenance.
+> It shows observed events + the snapshot/ingest fallback so the tool is useful
+> immediately.
+
+
 ## Module map
 
 ```
