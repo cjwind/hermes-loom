@@ -1027,9 +1027,7 @@ async function loadPromptDetail(sid) {
     el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, icon("clock", { s: 11 }), fmtTime(d.started_at)),
     d.model && el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, d.model),
     d.source && el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, d.source),
-    el("span", { class: "loom-meta" }, tr("prompt.metaSummary", { m: fmtInt(d.message_count), c: fmtInt(d.chars), l: fmtInt(d.lines) })),
-    el("div", { style: { flex: "1" } }),
-    el("button", { class: "loom-btn ghost", onclick: () => doCopyPrompt(d.system_prompt) }, icon("link", { s: 13 }), tr("common.copy")));
+    el("span", { class: "loom-meta" }, tr("prompt.metaSummary", { m: fmtInt(d.message_count), c: fmtInt(d.chars), l: fmtInt(d.lines) })));
 
   const body = outline
     ? el("div", { style: { display: "grid", gridTemplateColumns: "minmax(0,1fr) 230px", gap: "16px", alignItems: "start" } }, pre, outline)
@@ -1104,11 +1102,6 @@ function promptMessagesSection(d) {
           tc.arguments && el("pre", { style: { margin: "5px 0 0", fontSize: "11.5px", color: "var(--text-2)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", fontFamily: "IBM Plex Mono, ui-monospace, monospace" } }, typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments, null, 2)))));
     }));
 }
-const doCopyPrompt = guard(async function (text) {
-  await navigator.clipboard.writeText(text || "");
-  pushToast({ tone: "human", text: tr("prompt.copied") });
-});
-
 // ───────────────────────── packs (middle memory layer) ─────────────────────────
 const parseTagsInput = (s) => (s || "").split(/[,，]/).map((x) => x.trim()).filter(Boolean);
 function packTagChips(tags, opts) {
