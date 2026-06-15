@@ -42,6 +42,7 @@ const ICONS = {
   x: '<path d="M4 4l8 8M12 4l-8 8"/>',
   note: '<g><path d="M3 3.5h10v6l-3 3H3v-9z"/><path d="M13 9.5h-3v3"/></g>',
   dots: '<circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/>',
+  globe: '<g><circle cx="8" cy="8" r="6"/><ellipse cx="8" cy="8" rx="2.6" ry="6"/><path d="M2 8h12"/></g>',
 };
 function icon(name, { s = 13, color, w = 1.5 } = {}) {
   const ns = "http://www.w3.org/2000/svg";
@@ -337,7 +338,7 @@ function buildHeader() {
   const themeBtn = el("button", { class: "loom-btn", onclick: toggleTheme });
   D.themeBtn = themeBtn; paintThemeBtn();
   const langBtn = el("button", { class: "loom-btn", title: tr("lang.switchTitle"),
-    onclick: () => window.LoomI18n.toggleLang() }, tr("lang.name"));
+    onclick: () => window.LoomI18n.toggleLang() }, icon("globe", { s: 14 }), tr("lang.name"));
   const pill = el("span", { class: "loom-pill" }, el("span", { class: "loom-dot" }), tr("status.checking"));
   D.pill = pill;
   return el("div", { class: "loom-top" },
