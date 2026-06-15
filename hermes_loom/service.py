@@ -316,7 +316,10 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
         "cat": cat,
         "detail": detail or (_HINT_LABEL.get(hint, "Hermes 自動沉澱的紀錄")),
         "conf": _HINT_CONF.get(hint, 2),
-        "when": _rel_time(origin["timestamp"]) if origin else "",
+        # Prefer the originating event's time; fall back to the record's sortable
+        # ts (e.g. a skill's file mtime) so skills/snapshots still show a time
+        # instead of "—". _rel_time returns "" when there's genuinely no ts.
+        "when": _rel_time(origin["timestamp"]) if origin else _rel_time(ts),
         "originId": ("session · " + sess[-6:]) if sess else "—",
         "origin": (origin or {}).get("tool_name") or "Hermes",
         "session_id": sess,
