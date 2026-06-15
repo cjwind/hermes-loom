@@ -440,7 +440,7 @@ def list_packs(ledger: Ledger) -> dict:
 
 
 def save_pack(ledger: Ledger, *, pack_id=None, title: str, tags: list,
-              content: str, enabled: bool = True) -> dict:
+              content: str, enabled: bool = True, when_to_use: str = None) -> dict:
     """Create a pack (no id) or update an existing one (with id)."""
     title = (title or "").strip()
     if not title:
@@ -449,13 +449,14 @@ def save_pack(ledger: Ledger, *, pack_id=None, title: str, tags: list,
         raise ValueError("content required")
     if not isinstance(tags, list):
         raise ValueError("tags must be a list")
+    when_to_use = (when_to_use or "").strip() or None
     if pack_id:
         ok = ledger.update_pack(int(pack_id), title=title, tags=tags,
-                                content=content, enabled=enabled)
+                                content=content, enabled=enabled, when_to_use=when_to_use)
         if not ok:
             raise ValueError(f"pack {pack_id} not found")
         return {"id": int(pack_id), "updated": True, "pack": ledger.get_pack(int(pack_id))}
-    new_id = ledger.create_pack(title, tags, content, enabled=enabled)
+    new_id = ledger.create_pack(title, tags, content, enabled=enabled, when_to_use=when_to_use)
     return {"id": new_id, "created": True, "pack": ledger.get_pack(new_id)}
 
 
@@ -478,29 +479,31 @@ def recall(ledger: Ledger, message: str, limit: int = 8,
     packs = ledger.list_packs(enabled_only=True)
     if not packs:
         return {"tags": [], "method": "none", "count": 0, "context": "", "records": []}
-    # vocabulary = every pack title + every tag (matched case-insensitively)
-    vocab = sorted({p["title"] for p in packs} | {t for p in packs for t in p["tags"]})
-    matched, method = tagger.resolve_tags(message, vocab)
-    if not matched:
+    selected_ids, method = tagger.select_packs(message, [
+        {"id": p["id"], "title": p["title"], "tags": p["tags"],
+         "when_to_use": p.get("when_to_use") or ""}
+        for p in packs])
+    sel_set = set(selected_ids)
+    hits = [p for p in packs if p["id"] in sel_set][:limit]
+    if not hits:
         return {"tags": [], "method": method, "count": 0, "context": "", "records": [],
                 "llm_configured": tagger.llm_configured()}
-    mset = {t.lower() for t in matched}
-    hits = [p for p in packs
-            if p["title"].lower() in mset or any(t.lower() in mset for t in p["tags"])][:limit]
-    lines = ["（Hermes Loom 依「" + "、".join(matched) + "」帶入相關記憶 pack）"]
+    titles = [p["title"] for p in hits]
+    lines = ["（Hermes Loom 依情境帶入相關記憶 pack：" + "、".join(titles) + "）"]
     for p in hits:
         lines.append("【" + p["title"] + "】\n" + p["content"])
-    context = "\n\n".join(lines) if hits else ""
+    context = "\n\n".join(lines)
     out_records = [{"id": "pack:" + str(p["id"]), "title": p["title"],
                     "value": (p["content"] if len(p["content"]) <= 300 else p["content"][:300] + "…"),
                     "tags": p["tags"]} for p in hits]
-    if log and hits:
+    if log:
         try:
-            ledger.add_recall(message=message, method=method, tags=matched,
+            ledger.add_recall(message=message, method=method, tags=titles,
                               count=len(hits), records=out_records, session_id=session_id)
         except Exception:  # noqa: BLE001 - logging must never break a turn
             pass
-    return {"tags": matched, "method": method, "count": len(hits), "context": context,
+    # `tags` carries the selected pack titles (what was injected) for the UI log.
+    return {"tags": titles, "method": method, "count": len(hits), "context": context,
             "llm_configured": tagger.llm_configured(), "records": out_records}
 
 

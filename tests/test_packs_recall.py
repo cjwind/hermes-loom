@@ -32,6 +32,14 @@ class TestPackStorage(LoomTestCase):
         pid = led.create_pack("t", ["A", "a", " B ", ""], "c")
         self.assertEqual(led.get_pack(pid)["tags"], ["A", "B"])
 
+    def test_when_to_use_stored(self):
+        led = self.ledger()
+        pid = led.create_pack("風浪板", ["運動"], "三年經驗", when_to_use="聊到水上活動時")
+        self.assertEqual(led.get_pack(pid)["when_to_use"], "聊到水上活動時")
+        # save_pack trims blank when_to_use to None
+        res = service.save_pack(led, title="t", tags=[], content="c", when_to_use="   ")
+        self.assertIsNone(led.get_pack(res["id"])["when_to_use"])
+
     def test_save_pack_validates(self):
         led = self.ledger()
         with self.assertRaises(ValueError):
@@ -88,6 +96,54 @@ class TestTaggerLLM(LoomTestCase):
         self.assertEqual(matched, ["food"])
 
 
+class TestSelectPacks(LoomTestCase):
+    PACKS = [
+        {"id": 1, "title": "飲食", "tags": ["food"], "when_to_use": "聊到吃的或過敏時"},
+        {"id": 2, "title": "windsurf", "tags": [], "when_to_use": "想出門透氣或運動時"},
+    ]
+
+    def test_keyword_selects_by_title_or_tag(self):
+        os.environ.pop("LOOM_LLM_BASE_URL", None)
+        os.environ.pop("LOOM_LLM_MODEL", None)
+        ids, method = tagger.select_packs("any food notes?", self.PACKS)
+        self.assertEqual(method, "keyword")
+        self.assertEqual(ids, [1])
+        ids, _ = tagger.select_packs("let's windsurf this weekend", self.PACKS)
+        self.assertEqual(ids, [2])
+        self.assertEqual(tagger.select_packs("tell a joke", self.PACKS)[0], [])
+
+    def test_empty_inputs(self):
+        self.assertEqual(tagger.select_packs("", self.PACKS), ([], "none"))
+        self.assertEqual(tagger.select_packs("hi", []), ([], "none"))
+
+    def test_llm_selects_by_when_to_use(self):
+        os.environ["LOOM_LLM_BASE_URL"] = "http://fake"
+        os.environ["LOOM_LLM_MODEL"] = "m"
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("LOOM_LLM_BASE_URL", "LOOM_LLM_MODEL")])
+
+        class FakeResp:
+            def __init__(self, body): self._b = body
+            def read(self): return json.dumps(self._b).encode()
+            def __enter__(self): return self
+            def __exit__(self, *a): return False
+        # message has no literal title/tag, but when_to_use ("出門透氣") applies —
+        # the (mocked) LLM returns pack id 2.
+        body = {"choices": [{"message": {"content": "[2]"}}]}
+        with mock.patch("urllib.request.urlopen", return_value=FakeResp(body)):
+            ids, method = tagger.select_packs("我好悶想去海邊走走", self.PACKS)
+        self.assertEqual(method, "llm")
+        self.assertEqual(ids, [2])
+
+    def test_llm_failure_falls_back_to_keyword(self):
+        os.environ["LOOM_LLM_BASE_URL"] = "http://fake"
+        os.environ["LOOM_LLM_MODEL"] = "m"
+        self.addCleanup(lambda: [os.environ.pop(k, None) for k in ("LOOM_LLM_BASE_URL", "LOOM_LLM_MODEL")])
+        with mock.patch("urllib.request.urlopen", side_effect=OSError("boom")):
+            ids, method = tagger.select_packs("any food notes?", self.PACKS)
+        self.assertEqual(method, "keyword")
+        self.assertEqual(ids, [1])
+
+
 class TestPackRecall(LoomTestCase):
     def _seed(self):
         led = self.ledger()
@@ -98,7 +154,7 @@ class TestPackRecall(LoomTestCase):
     def test_recall_injects_only_matching_pack(self):
         led = self._seed()
         res = service.recall(led, "any food restrictions?")
-        self.assertEqual(res["tags"], ["food"])
+        self.assertEqual(res["tags"], ["飲食"])   # selected pack titles
         self.assertEqual(res["count"], 1)
         self.assertIn("甲殼類", res["context"])
         self.assertNotIn("靠窗", res["context"])
@@ -145,9 +201,9 @@ class TestRecallLog(LoomTestCase):
         log = service.recall_log(led)["recalls"]
         self.assertEqual(len(log), 1)
         self.assertEqual(log[0]["method"], "keyword")
-        self.assertEqual(log[0]["tags"], ["food"])
         self.assertEqual(log[0]["count"], 1)
         self.assertEqual(log[0]["session_id"], "s1")
+        self.assertEqual(log[0]["tags"], ["飲食"])
         self.assertEqual(log[0]["records"][0]["title"], "飲食")
 
     def test_recall_does_not_log_by_default(self):

@@ -203,6 +203,7 @@ def h_pack_save(ledger, params, query, body):
             ledger, pack_id=body.get("id"), title=body.get("title", ""),
             tags=body.get("tags", []), content=body.get("content", ""),
             enabled=bool(body.get("enabled", True)),
+            when_to_use=body.get("when_to_use", ""),
         )
         return 200, {"ok": True, **res}
     except ValueError as e:

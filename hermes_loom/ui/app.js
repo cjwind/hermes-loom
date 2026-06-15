@@ -1044,6 +1044,7 @@ function paintPackList() {
         el("span", { style: { width: "6px", height: "6px", borderRadius: "50%", flex: "0 0 auto", background: p.enabled ? "var(--cat-fact, var(--accent))" : "var(--text-4)" }, title: p.enabled ? "啟用中" : "已停用" }),
         el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, p.title || "（未命名）")),
       (p.tags || []).length ? el("div", { style: { display: "flex", gap: "4px", flexWrap: "wrap", margin: "4px 0 0 12px" } }, ...packTagChips(p.tags.slice(0, 4), { height: "15px", fontSize: "9px" })) : null,
+      p.when_to_use ? el("div", { style: { fontSize: "10px", color: "var(--text-3)", fontStyle: "italic", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: p.when_to_use }, "時機：" + p.when_to_use) : null,
       el("div", { class: "loom-meta", style: { fontSize: "10.5px", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, (p.content || "").slice(0, 50)));
   });
   D.packList.replaceChildren(...[
@@ -1062,11 +1063,13 @@ function renderPackDetail() {
 
   const title = el("input", { class: "loom-input", placeholder: "標題，例如：風浪板", value: p.title });
   const tags = el("input", { class: "loom-input", placeholder: "標籤，用逗號分隔，例如：運動, 戶外, 心情", value: (p.tags || []).join(", ") });
+  const whenTo = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "62px", resize: "vertical", padding: "10px 14px", lineHeight: "1.6", fontSize: "12.5px", boxSizing: "border-box" }, placeholder: "描述什麼情境下該帶入這個 pack，例如：聊到水上活動、裝備、或想出門透氣時。" });
+  whenTo.value = p.when_to_use || "";
   const content = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "34vh", resize: "vertical", padding: "12px 14px", lineHeight: "1.6", fontSize: "13px", boxSizing: "border-box" }, placeholder: "純文字內容。被選中時這段會原樣注入給模型。" });
   content.value = p.content;
   const enabled = el("input", { type: "checkbox", style: { width: "15px", height: "15px", accentColor: "var(--accent)" } });
   enabled.checked = !!p.enabled;
-  D.packTitle = title; D.packTags = tags; D.packContent = content; D.packEnabled = enabled;
+  D.packTitle = title; D.packTags = tags; D.packWhen = whenTo; D.packContent = content; D.packEnabled = enabled;
 
   const field = (label, node, hint) => el("div", { style: { marginBottom: "13px" } },
     el("div", { style: { fontSize: "11px", fontWeight: "600", color: "var(--text-2)", marginBottom: "5px" } }, label),
@@ -1079,7 +1082,8 @@ function renderPackDetail() {
       el("div", { style: { fontSize: "16px", fontWeight: "700" } }, isNew ? "新增 pack" : "編輯 pack"),
       !isNew && el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, "#" + p.id)),
     field("標題", title, "也會被當成比對關鍵字之一"),
-    field("標籤", tags, "對話時用 AI／關鍵字比對你的訊息；命中標題或任一標籤就注入這個 pack"),
+    field("標籤", tags, "keyword fallback 用：命中標題或任一標籤就注入"),
+    field("適用時機", whenTo, "對話時 AI 會連同標題、標籤一起判斷此情境是否該注入這個 pack"),
     field("內容", content),
     el("label", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", cursor: "pointer", fontSize: "12.5px", color: "var(--text-2)" } },
       enabled, "啟用（停用的 pack 不會被注入）"),
@@ -1104,7 +1108,7 @@ function packTestPanel() {
     D.packTestOut);
 }
 const doPackSave = guard(async function () {
-  const body = { title: D.packTitle.value, tags: parseTagsInput(D.packTags.value), content: D.packContent.value, enabled: D.packEnabled.checked };
+  const body = { title: D.packTitle.value, tags: parseTagsInput(D.packTags.value), when_to_use: D.packWhen.value, content: D.packContent.value, enabled: D.packEnabled.checked };
   if (S.packSel !== "new") body.id = S.packSel;
   const res = await api.post("/packs/save", body);
   S.packSel = res.id;

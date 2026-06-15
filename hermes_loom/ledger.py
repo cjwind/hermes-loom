@@ -145,6 +145,7 @@ CREATE TABLE IF NOT EXISTS packs (
     title TEXT NOT NULL,
     tags_json TEXT,                          -- JSON array of tag strings
     content TEXT NOT NULL,
+    when_to_use TEXT,                        -- free-text "適用時機"; fed to the LLM matcher
     enabled INTEGER NOT NULL DEFAULT 1,       -- disabled packs are never injected
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
@@ -207,7 +208,18 @@ class Ledger:
             # without transient "database is locked" errors.
             self.conn.execute("PRAGMA busy_timeout=5000")
             self.conn.executescript(SCHEMA)
+            self._migrate()
             self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Idempotent column adds for DBs created before a column existed.
+
+        ``CREATE TABLE IF NOT EXISTS`` won't add new columns to an existing table,
+        so additive schema changes need an explicit (and safe-to-repeat) ALTER.
+        """
+        have = {r["name"] for r in self.conn.execute("PRAGMA table_info(packs)")}
+        if "when_to_use" not in have:
+            self.conn.execute("ALTER TABLE packs ADD COLUMN when_to_use TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -538,26 +550,27 @@ class Ledger:
         d["enabled"] = bool(d.get("enabled", 1))
         return d
 
-    def create_pack(self, title: str, tags, content: str, enabled: bool = True) -> int:
+    def create_pack(self, title: str, tags, content: str, enabled: bool = True,
+                    when_to_use: Optional[str] = None) -> int:
         ts = _now()
         with self._lock:
             cur = self.conn.execute(
-                "INSERT INTO packs(title,tags_json,content,enabled,created_at,updated_at)"
-                " VALUES(?,?,?,?,?,?)",
+                "INSERT INTO packs(title,tags_json,content,when_to_use,enabled,created_at,updated_at)"
+                " VALUES(?,?,?,?,?,?,?)",
                 (title, json.dumps(self._clean_tags(tags), ensure_ascii=False),
-                 content, 1 if enabled else 0, ts, ts),
+                 content, when_to_use, 1 if enabled else 0, ts, ts),
             )
             self.conn.commit()
             return int(cur.lastrowid)
 
     def update_pack(self, pack_id: int, *, title: str, tags, content: str,
-                    enabled: bool = True) -> bool:
+                    enabled: bool = True, when_to_use: Optional[str] = None) -> bool:
         with self._lock:
             cur = self.conn.execute(
-                "UPDATE packs SET title=?, tags_json=?, content=?, enabled=?, updated_at=? "
-                "WHERE id=?",
+                "UPDATE packs SET title=?, tags_json=?, content=?, when_to_use=?, "
+                "enabled=?, updated_at=? WHERE id=?",
                 (title, json.dumps(self._clean_tags(tags), ensure_ascii=False),
-                 content, 1 if enabled else 0, _now(), pack_id),
+                 content, when_to_use, 1 if enabled else 0, _now(), pack_id),
             )
             self.conn.commit()
             return cur.rowcount > 0
