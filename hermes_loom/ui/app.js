@@ -883,7 +883,7 @@ async function viewSession(sid) {
   overlay.append(panel); document.body.append(overlay);
   try {
     const d = await api.get("/sessions/" + encodeURIComponent(sid) + "/context?limit=24");
-    panel.replaceChildren(
+    panel.replaceChildren(...[
       el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" } },
         icon("link", { s: 14 }), el("b", {}, "Session " + sid),
         d.meta && d.meta.source && el("span", { class: "loom-tag tag-auto" }, d.meta.source),
@@ -892,7 +892,8 @@ async function viewSession(sid) {
       ...(d.messages || []).map((m) => el("div", { class: "loom-quote", style: { marginBottom: "8px", borderLeftColor: m.role === "user" ? "var(--accent-line)" : "var(--border-2)" } },
         el("span", { class: "who" }, (m.role || "") + (m.tool_name ? " · " + m.tool_name : "")),
         el("span", {}, (m.snippet || "") + (m.truncated ? " …" : "")))),
-      !(d.messages || []).length && el("div", { class: "loom-meta" }, tr("session.noMessages")));
+      !(d.messages || []).length && el("div", { class: "loom-meta" }, tr("session.noMessages")),
+    ].filter(Boolean));
   } catch (e) {
     panel.append(el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message })));
   }
