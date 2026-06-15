@@ -557,10 +557,17 @@ def _memory_version_history(
     for e in events:
         by_key.setdefault(e["target_key"], []).append(e)
 
-    def _producing(k, val):
-        """The event that set value ``val`` under key ``k`` (prefer an exact
-        text match, else the newest event for that key)."""
-        cands = by_key.get(k, [])
+    def _older(e: dict, ref: dict) -> bool:
+        """``e`` happened strictly before ``ref`` (timestamp, then id to break ties)."""
+        et, rt = e.get("timestamp") or 0, ref.get("timestamp") or 0
+        return et < rt or (et == rt and (e.get("id") or 0) < (ref.get("id") or 0))
+
+    def _producing(k, val, ref):
+        """The event that set value ``val`` under key ``k`` *before* ``ref`` (prefer
+        an exact text match, else the newest such event). The time bound stops a
+        later duplicate-value edit — e.g. restoring to an old value, which reuses
+        that value's content-hash key — from linking forward and forming a cycle."""
+        cands = [e for e in by_key.get(k, []) if _older(e, ref)]
         return next((e for e in cands if e["after_text"] == val), None) or (cands[0] if cands else None)
 
     cur = next((e for e in events
@@ -579,9 +586,10 @@ def _memory_version_history(
         prev_val = cur["before_text"]
         if not prev_key and prev_val is None:
             break
-        nxt = _producing(prev_key, prev_val) if prev_key else None
+        nxt = _producing(prev_key, prev_val, cur) if prev_key else None
         if nxt is None and prev_val is not None:
-            nxt = next((e for e in events if e["after_text"] == prev_val), None)
+            nxt = next((e for e in events
+                        if e["after_text"] == prev_val and _older(e, cur)), None)
         cur = nxt
     chain.reverse()  # oldest→newest
 
@@ -689,8 +697,13 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
             hist = _memory_version_history(ledger, target_type, key, ent["text"])
             if len(hist) >= 2:
                 rec["versions"] = hist
+                # The chain ends at the current state, so the active version is the
+                # *last* one matching the live text — not the first. After a restore
+                # the same value appears twice; first-match would point at the old
+                # copy instead of the just-restored current one.
                 rec["active"] = next(
-                    (i for i, v in enumerate(hist) if v["value"] == ent["text"]),
+                    (i for i in range(len(hist) - 1, -1, -1)
+                     if hist[i]["value"] == ent["text"]),
                     len(hist) - 1,
                 )
     elif target_type == "skill":

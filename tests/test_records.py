@@ -2,6 +2,7 @@
 
 from base import LoomTestCase
 from hermes_loom import service, overrides
+from hermes_loom.memory_parser import entry_key
 from hermes_loom.observer import Observer
 
 
@@ -114,6 +115,33 @@ class TestRecords(LoomTestCase):
         self.assertEqual(d["versions"][-1]["kind"], "human")   # the manual edit
         self.assertEqual(d["versions"][2]["kind"], "auto")     # an auto edit
         self.assertEqual(d["active"], 3)                       # current = newest
+
+    def test_memory_restore_keeps_full_history(self):
+        # Restoring to an older version (a forward edit back to a past value)
+        # must NOT collapse or corrupt the chain: the whole history survives,
+        # the restored value is appended as the newest version, and `active`
+        # points at that just-restored copy — not the earlier identical one.
+        self.write_memory("user", "User likes tea.")
+        led = self.ledger()
+        led.add_event(kind="memory_added", target_type="user", action="add",
+                      target_key=entry_key("User likes tea."),
+                      after_text="User likes tea.", source_hint="statedb_ingest")
+        key = entry_key("User likes tea.")
+        for nxt in ("User likes green tea.", "User likes oolong tea.", "User loves matcha."):
+            service.record_edit(led, "user", key, nxt)
+            key = entry_key(nxt)
+
+        # restore to v2 ("green tea") the way the UI does — a forward edit
+        service.record_edit(led, "user", key, "User likes green tea.")
+        key = entry_key("User likes green tea.")
+
+        d = service.record_detail(led, "user:" + key)
+        self.assertEqual([v["value"] for v in d["versions"]], [
+            "User likes tea.", "User likes green tea.", "User likes oolong tea.",
+            "User loves matcha.", "User likes green tea.",
+        ])
+        self.assertEqual(d["active"], 4)                       # the restored copy
+        self.assertEqual(d["versions"][d["active"]]["value"], "User likes green tea.")
 
     def test_memory_unedited_entry_stays_single_version(self):
         # No recorded edits → no synthetic chain; the record keeps its lone version.
