@@ -281,7 +281,7 @@ def _state(states: dict, target_type: str, key: str) -> dict:
 # --- source trace / provenance -----------------------------------------------
 # How well can we trace a record back to where it came from? Rather than a
 # binary "found / not found", classify into states the UI can explain and that
-# carry an honest confidence. See README "Source trace".
+# carry an honest confidence.
 #
 #   exact_match  — a precise originating conversation snippet exists
 #   window_match — no precise snippet, but the session window is available
