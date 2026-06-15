@@ -1,0 +1,17 @@
+# Keep the build context tiny — only hermes_loom/ is COPYed in.
+.git/
+**/__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+loom-export/
+tests/
+docs/
+.claude/
+scripts/
+*.zip
+*.loomtmp
+ledger.db
+ledger.db-*

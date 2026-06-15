@@ -78,6 +78,27 @@ install: ## pip-install Loom into the current environment (service + Hermes plug
 install-plugin: ## Copy the plugin into a Hermes install ($HERMES_HOME/plugins) — local or SSH host: make install-plugin HOST=rpi
 	./scripts/install-plugin.sh $(HOST)
 
+## --- docker ----------------------------------------------------------------
+# Run the whole stack in a container — no host Python / pip needed.
+# UID/GID are passed through so container-written files aren't root-owned.
+DOCKER_ENV = UID=$(shell id -u) GID=$(shell id -g)
+
+.PHONY: docker-build
+docker-build: ## Build the hermes-loom Docker image
+	docker compose build
+
+.PHONY: docker-serve
+docker-serve: ## Run the UI in a container on 127.0.0.1:8765
+	$(DOCKER_ENV) docker compose up
+
+.PHONY: docker-sync
+docker-sync: ## One-shot: bootstrap + ingest + reconcile, in a container
+	$(DOCKER_ENV) docker compose run --rm loom sync
+
+.PHONY: docker-status
+docker-status: ## Print ledger event counts from a container
+	$(DOCKER_ENV) docker compose run --rm loom status
+
 ## --- housekeeping ----------------------------------------------------------
 
 .PHONY: clean

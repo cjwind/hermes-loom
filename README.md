@@ -1,83 +1,92 @@
 # 🧵 Hermes Loom
 
-Hermes Loom is a local-first growth observability and tuning layer for Hermes Agent. See what Hermes learned in memory, skills, and SOUL. Edit, delete, and compile them back into Hermes runtime files.
+Hermes Loom is a local-first growth observability and tuning layer for Hermes Agent.
 
-- **Observes** — what Hermes actually "grew" (memory & skills added / replaced / removed), which conversation it came from, and how it happened;
-- **Records provenance** — every growth event is written to Loom's own append-only SQLite ledger, fully separate from Hermes' native state;
-- **Tunes** — when *you* ask, writes edits back to the real Hermes files safely (with snapshot backups).
+It helps you inspect what Hermes has learned across SOUL.md, USER.md, MEMORY.md, and skills, then edit, delete, classify, and compile those changes back into Hermes.
 
-Hermes' native auto-deposit behavior is fully preserved; Loom only observes, and only acts when you tell it to.
+Loom is built for people who want long-running agents to be understandable and controllable, not just increasingly opaque.
 
 ## Features
 
-- **Three-tier provenance** — `plugin_hook` (live plugin hook, most precise) → `statedb_ingest` (offline backfill from `state.db` tool calls, precise) → `snapshot_diff` (snapshot-diff inference, fallback).
-- **Four UI views**:
-  1. **Inspector** — what Hermes grew, where it came from, and in-place tuning (edit / delete / recategorize / annotate).
-  2. **SOUL** — edit the agent identity file `SOUL.md` and compile it back out to `~/.hermes/SOUL.md` on demand.
-  3. **Packs** — a Loom-only middle memory layer, injected by message semantics on the `pre_llm_call` hook.
-  4. **Prompt** — inspect the fully-assembled request of any past conversation (system prompt + message stream + injected context).
-- **Two ways to run** — mount it as a live Hermes **plugin**, or run it as a **standalone CLI / service** to analyze an existing `state.db` offline.
-
-## Data layers (never mixed)
-
-```
-~/.hermes/                          # Hermes native state (owned by Hermes)
-├── memories/{MEMORY.md, USER.md}   #   memory (entries separated by a single-line §)
-├── skills/<category>/<skill>/SKILL.md
-├── SOUL.md                         #   agent identity
-└── state.db                        #   session store (Loom reads only)
-
-~/.hermes-loom/                     # Loom's own state (owned by Loom)
-├── ledger.db                       #   append-only growth ledger
-└── backups/                        #   snapshot backups taken before writing native files
-```
-
----
+- Inspect Hermes growth across memory, USER.md, SOUL.md, and skills
+- Edit or delete bad, stale, or overly specific agent learnings
+- Manage SOUL.md as a first-class layer
+- Compile Loom-managed records back into Hermes runtime files
+- Organize task-specific middle-layer context packs
+- Dynamically inject relevant packs for specific tasks
+- Inspect prompt composition and context assembly
 
 ## Quick Start
 
 ### Requirements
 
-- Python **3.10+**
+- Docker (with the Compose plugin) — that's it; the image is fully self-contained.
 - A local Hermes install (defaults to `~/.hermes`)
 
-### Install
+> Loom is pure Python stdlib, so it has no dependencies to install. Running it in
+> a container avoids touching your host Python at all — no `pip install`, and no
+> `error: externally-managed-environment` (PEP 668).
+
+### Build the image
 
 ```bash
-# Get the source
 git clone https://gitlab.com/cjwind/hermes-loom.git
 cd hermes-loom
 
-# Install (no runtime deps; either works)
-pip install -e .          # editable, for development
-# or
-pip install .             # regular install
+docker compose build      # builds the local `hermes-loom` image
 ```
 
-> No install required either: it's pure stdlib, so you can run `python -m hermes_loom <command>` directly.
+The container reads/writes two host directories, mounted by Compose:
+
+- your Hermes install → `/hermes` (`HERMES_HOME`)
+- Loom's own ledger + snapshots → `/loom` (`LOOM_HOME`), persisted on the host
+
+Passing `UID`/`GID` runs the container as you, so files it writes aren't root-owned.
+Export them once per shell to keep the commands short, and pre-create Loom's data
+dir so Docker doesn't create it as `root` on first mount:
+
+```bash
+export UID="$(id -u)" GID="$(id -g)"
+mkdir -p ~/.hermes-loom
+```
 
 ### Usage
 
-After installing, use the `hermes-loom` console command — or the equivalent `python -m hermes_loom`:
+Run one-shot CLI commands with `docker compose run --rm loom <subcommand>`:
 
 ```bash
 # 1. Seed the ledger: import current memory & skills as a baseline snapshot
-hermes-loom bootstrap
+docker compose run --rm loom bootstrap
 
 # 2. Backfill past growth events from state.db (precise provenance)
-hermes-loom ingest
+docker compose run --rm loom ingest
 
 # 3. Full refresh in one shot (bootstrap + ingest + snapshot-diff fallback)
-hermes-loom sync
+docker compose run --rm loom sync
 
 # 4. Show ledger stats
-hermes-loom status
+docker compose run --rm loom status
 
-# 5. Start the local UI / API (defaults to 127.0.0.1:8765)
-hermes-loom serve
-#   open http://127.0.0.1:8765 in your browser
-hermes-loom serve --host 0.0.0.0 --port 9000   # custom host / port
+# 5. Start the local UI / API on http://127.0.0.1:8765
+docker compose up                         # foreground (Ctrl-C to stop)
+docker compose up -d                      # background; `docker compose down` to stop
 ```
+
+`docker compose up` is the `serve` command — the image's default. It binds
+`0.0.0.0` *inside* the container, but Compose only publishes the port to
+`127.0.0.1` on your host. To use a different host port, edit the `ports:` line in
+`docker-compose.yml` (e.g. `"127.0.0.1:9000:8765"`).
+
+> Prefer plain `docker run`? It works too — just mount the same two volumes:
+>
+> ```bash
+> docker run --rm -it \
+>   -u "$(id -u):$(id -g)" \
+>   -v "$HOME/.hermes:/hermes" \
+>   -v "$HOME/.hermes-loom:/loom" \
+>   -p 127.0.0.1:8765:8765 \
+>   hermes-loom status        # or: serve / sync / bootstrap / …
+> ```
 
 Full subcommands:
 
@@ -92,35 +101,32 @@ Full subcommands:
 | `compile [--out DIR \| --in-place] [--as-of ...] [--no-sync]` | Rebuild `MEMORY.md` / `USER.md` / `SKILL.md` / `SOUL.md` from ledger snapshots |
 
 > `compile` writes to a safe `./loom-export` by default and **never** touches `~/.hermes`. Only `--in-place` overwrites the real files, and each file is backed up to `~/.hermes-loom/backups/` before being overwritten.
+>
+> **In Docker:** the default `./loom-export` lands *inside* the container and is discarded when it exits. To keep a dir export, write it under a mounted volume, e.g. `docker compose run --rm loom compile --out /loom/export` (ends up in `~/.hermes-loom/export` on the host). `--in-place` works as usual — it writes to the mounted `/hermes`, with backups under `/loom/backups`.
 
 ### Mount as a live Hermes plugin (optional)
 
 To have Loom observe growth *in real time* via the `post_tool_call` hook, install it into Hermes' plugins directory and enable it:
 
 ```bash
-# Install into the local ~/.hermes
+# Install into the local ~/.hermes (run on the host, not in the container)
 scripts/install-plugin.sh
-
-# Or install onto a remote host (over SSH)
-scripts/install-plugin.sh <ssh-host>
 ```
 
-If Loom was installed via `pip install`, Hermes also auto-discovers it through the `hermes_agent.plugins` entry point and calls `register(ctx)` — no manual copying needed.
+This copies the plugin (`plugin.yaml` + `__init__.py`) into `$HERMES_HOME/plugins/` so Hermes loads it directly — independent of the Loom container, which observes Hermes offline via `state.db` and snapshots.
 
 ### Configuration (environment variables)
 
-All paths can be overridden by environment variables (Loom also auto-loads `~/.hermes/.env`):
+All paths are resolved from environment variables (Loom also auto-loads `$HERMES_HOME/.env`). With Docker, `HERMES_HOME` and `LOOM_HOME` are set to the in-container mount points (`/hermes`, `/loom`) by the image; you point them at host directories via the `volumes:` in `docker-compose.yml`:
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `HERMES_HOME` | `~/.hermes` | Root of the Hermes native install |
-| `LOOM_HOME` | `~/.hermes-loom` | Where Loom keeps its ledger + snapshots |
-| `LOOM_DB` | `$LOOM_HOME/ledger.db` | Ledger database path |
+| Variable | In-container value | Host directory (volume) | Description |
+| --- | --- | --- | --- |
+| `HERMES_HOME` | `/hermes` | `~/.hermes` (override with host `HERMES_HOME`) | Root of the Hermes native install |
+| `LOOM_HOME` | `/loom` | `~/.hermes-loom` (override with host `LOOM_HOME`) | Where Loom keeps its ledger + snapshots |
+| `LOOM_DB` | `$LOOM_HOME/ledger.db` | — | Ledger database path |
 
----
+To mount a Hermes install that lives elsewhere, set `HERMES_HOME` (and/or `LOOM_HOME`) in your host shell before `docker compose …` — Compose substitutes them into the volume paths.
 
-## Further reading
+## License
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — layered architecture & design notes
-- [`docs/DOC.md`](docs/DOC.md) — features & data sources
-- [`docs/DEMO.md`](docs/DEMO.md) — walkthrough
+MIT

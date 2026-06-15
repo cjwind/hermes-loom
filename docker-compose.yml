@@ -1,0 +1,36 @@
+# Hermes Loom via Docker Compose.
+#
+#   # build the image once
+#   docker compose build
+#
+#   # start the UI (http://127.0.0.1:8765)
+#   UID="$(id -u)" GID="$(id -g)" docker compose up
+#
+#   # run a one-shot CLI command (then exit)
+#   UID="$(id -u)" GID="$(id -g)" docker compose run --rm loom sync
+#   UID="$(id -u)" GID="$(id -g)" docker compose run --rm loom status
+#
+# Passing UID/GID makes the container run as *you*, so the ledger it writes to
+# ~/.hermes-loom and any Hermes files it edits aren't left owned by root.
+
+services:
+  loom:
+    build: .
+    image: hermes-loom
+    user: "${UID:-1000}:${GID:-1000}"
+    volumes:
+      # Your live Hermes install. Read-write so `compile --in-place` and the UI's
+      # edit/delete actions can write back. Make it ":ro" if you only ever want
+      # Loom to observe and never modify Hermes.
+      - "${HERMES_HOME:-${HOME}/.hermes}:/hermes"
+      # Loom's own ledger + snapshots, persisted on the host across runs.
+      - "${LOOM_HOME:-${HOME}/.hermes-loom}:/loom"
+    environment:
+      HERMES_HOME: /hermes
+      LOOM_HOME: /loom
+    # Publish ONLY to localhost: Loom has no auth and can edit Hermes
+    # memory/skills. Change to "8765:8765" to expose on your LAN (don't, unless
+    # you understand the risk).
+    ports:
+      - "127.0.0.1:8765:8765"
+    # Inherit the image CMD (serve --host 0.0.0.0 --port 8765).
