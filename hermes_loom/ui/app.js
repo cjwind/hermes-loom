@@ -43,6 +43,7 @@ const ICONS = {
   note: '<g><path d="M3 3.5h10v6l-3 3H3v-9z"/><path d="M13 9.5h-3v3"/></g>',
   dots: '<circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/>',
   globe: '<g><circle cx="8" cy="8" r="6"/><ellipse cx="8" cy="8" rx="2.6" ry="6"/><path d="M2 8h12"/></g>',
+  caret: '<path d="M6 4l4 4-4 4"/>',
 };
 function icon(name, { s = 13, color, w = 1.5 } = {}) {
   const ns = "http://www.w3.org/2000/svg";
@@ -728,7 +729,13 @@ function sectionHead(iconName, title, right) {
 }
 function versionRow(r, ver, idx) {
   const active = idx === r.active;
-  return el("div", { style: { display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", padding: "7px 11px", borderRadius: "var(--r2)", border: "1px solid " + (active ? "var(--accent-line)" : "var(--border)"), background: active ? "var(--accent-soft)" : "var(--inset)" } },
+  // collapsible body showing this version's full content; toggled by the header
+  const body = el("pre", { style: { display: "none", margin: "8px 0 1px", padding: "9px 11px", border: "1px solid var(--border)", borderRadius: "var(--r2)", background: "var(--surface)", fontSize: "12.5px", lineHeight: "1.55", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word" } }, ver.value);
+  const caret = el("span", { style: { color: "var(--text-3)", display: "flex", transition: "transform .12s" } }, icon("caret", { s: 11 }));
+  let open = false;
+  const toggle = () => { open = !open; body.style.display = open ? "block" : "none"; caret.style.transform = open ? "rotate(90deg)" : "none"; };
+  const header = el("div", { title: tr("version.toggle"), style: { display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", cursor: "pointer" }, onclick: toggle },
+    caret,
     el("span", { class: "loom-mono", style: { fontSize: "11px", fontWeight: "600", color: active ? "var(--accent-ink)" : "var(--text-3)" } }, ver.v),
     ver.kind === "human"
       ? el("span", { class: "loom-tag tag-human", style: { height: "19px" } }, icon("pencil", { s: 10 }), tr(ver.who))
@@ -737,7 +744,9 @@ function versionRow(r, ver, idx) {
     el("div", { style: { flex: "1" } }),
     active
       ? el("span", { class: "loom-meta", style: { color: "var(--accent-ink)", fontWeight: "600" } }, tr("version.current"))
-      : el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 8px", fontSize: "11px", color: "var(--accent-ink)" }, onclick: () => doEdit(r, ver.value, { restored: true }) }, icon("undo", { s: 11 }), tr("version.restore")));
+      : el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 8px", fontSize: "11px", color: "var(--accent-ink)" }, onclick: (e) => { e.stopPropagation(); doEdit(r, ver.value, { restored: true }); } }, icon("undo", { s: 11 }), tr("version.restore")));
+  return el("div", { style: { padding: "7px 11px", borderRadius: "var(--r2)", border: "1px solid " + (active ? "var(--accent-line)" : "var(--border)"), background: active ? "var(--accent-soft)" : "var(--inset)" } },
+    header, body);
 }
 // version diff: two pickers (從 / 到) over a full version timeline, rendered by
 // `render(a,b)` and re-rendered on selection change. Shared by skills (line-level

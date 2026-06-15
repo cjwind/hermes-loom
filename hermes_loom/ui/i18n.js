@@ -163,6 +163,7 @@
       // diff / versions
       "diff.identical": "兩個版本內容相同",
       "version.current": "目前生效",
+      "version.toggle": "點開看此版內容",
       "version.restore": "還原此版",
       "version.compare": "比較",
       "version.nVersions": "{n} 個版本",
@@ -401,6 +402,7 @@
       "anno.save": "Save note",
       "diff.identical": "The two versions are identical",
       "version.current": "Currently active",
+      "version.toggle": "Click to view this version's content",
       "version.restore": "Restore this version",
       "version.compare": "Compare",
       "version.nVersions": "{n} versions",
