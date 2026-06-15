@@ -29,7 +29,7 @@
       "nav.inspector": "檢視台",
       "nav.soul": "SOUL",
       "nav.packs": "記憶層",
-      "nav.prompts": "Prompt",
+      "nav.prompts": "對話記錄",
       // status pill
       "status.checking": "檢查狀態中…",
       "status.unknown": "狀態未知",
@@ -286,7 +286,7 @@
       "nav.inspector": "Inspector",
       "nav.soul": "SOUL",
       "nav.packs": "Memory packs",
-      "nav.prompts": "Prompt",
+      "nav.prompts": "Conversation log",
       "status.checking": "Checking status…",
       "status.unknown": "Status unknown",
       "status.fetchFailed": "Could not fetch status: {msg}",
