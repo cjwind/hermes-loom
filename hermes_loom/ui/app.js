@@ -787,25 +787,9 @@ function provEvidence(p) {
 function pipeline(r) {
   const vs = r.versions, stored = vs[r.active];
 
-  // ── Section A — source trace / provenance card ──
-  const p = r.provenance || { status: "missing" };
-  const jumpBtn = r.session_id
-    ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, tr("detail.jumpToChat"))
-    : null;
-  const sectionA = el("div", {},
-    sectionHead("link", tr("provenance.head"), jumpBtn),
-    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", flexWrap: "wrap" } },
-      provBadge(p)),
-    // For an exact match the quoted snippet *is* the evidence — skip the generic
-    // "we found a matching snippet" summary and let the original text speak.
-    p.status !== "exact_match" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6", marginBottom: "10px" } }, tr(p.summary_key || ("provenance.summary." + p.status))),
-    provEvidence(p),
-    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", flexWrap: "wrap" } },
-      el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, p.session_title || r.originId || tr("common.dash")),
-      el("span", { style: { color: "var(--text-4)" } }, "·"),
-      el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } }, icon("clock", { s: 12 }), whenText(r)),
-      el("span", { style: { color: "var(--text-4)" } }, "·"),
-      el("span", { class: "loom-meta" }, tr("detail.depositedAs", { cat: catLabel(r.cat) }))));
+  // Section A (source-trace / provenance card) is intentionally not rendered in
+  // the detail for now — the rail still shows a provChip, and the backend trace
+  // + helpers (provBadge/provEvidence/_source_trace) stay so it can return.
 
   // ── Section B — Hermes 沉澱的內容 ──
   let sectionB;
@@ -846,7 +830,7 @@ function pipeline(r) {
         ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
   }
 
-  return el("div", { style: { display: "flex", flexDirection: "column", gap: "22px" } }, sectionA, sectionB);
+  return el("div", { style: { display: "flex", flexDirection: "column", gap: "22px" } }, sectionB);
 }
 
 // session source viewer (modal)
