@@ -383,6 +383,14 @@ class Ledger:
         ).fetchone()
         return dict(row) if row else None
 
+    def list_skill_snapshots(self, skill_name: str) -> list[dict]:
+        """All snapshots for a skill, oldest first — the full content timeline."""
+        rows = self.conn.execute(
+            "SELECT * FROM skill_snapshots WHERE skill_name=? ORDER BY captured_at ASC, id ASC",
+            (skill_name,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     # -- soul versions -------------------------------------------------------
     def add_soul_version(
         self, content: str, content_hash: str, *, source: str = "ui_edit",

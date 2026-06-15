@@ -369,6 +369,39 @@ def _build_held_record(h: dict, states: dict) -> dict:
     }
 
 
+def _skill_version_history(ledger: Ledger, name: str, current_content: str) -> list[dict]:
+    """Full content timeline for a skill, oldest→newest, for the diff viewer.
+
+    Sourced from skill_snapshots (each holds the full SKILL.md at one captured
+    state). Consecutive identical-content snapshots are collapsed. Each version
+    is labelled from its originating event's provenance. The live file content is
+    appended as the newest version if it isn't already the last snapshot (e.g. an
+    offline edit not yet reconciled), so the viewer always reflects the file."""
+    history: list[dict] = []
+    prev_hash = None
+    for s in ledger.list_skill_snapshots(name):
+        if s["content_hash"] == prev_hash:
+            continue
+        prev_hash = s["content_hash"]
+        ev = ledger.get_event(s["source_event_id"]) if s.get("source_event_id") else None
+        hint = ev["source_hint"] if ev else None
+        human = hint == "manual_override"
+        history.append({
+            "kind": "human" if human else "auto",
+            "who": "你的修改" if human else _HINT_LABEL.get(hint, "Hermes 自動沉澱"),
+            "when": _rel_time(s["captured_at"]),
+            "value": s["content"] or "",
+        })
+
+    cur = current_content or ""
+    if not history or history[-1]["value"] != cur:
+        history.append({"kind": "auto", "who": "目前檔案", "when": "", "value": cur})
+
+    for i, h in enumerate(history):
+        h["v"] = f"v{i + 1}"
+    return history
+
+
 def _tag_skill_origin(rec: dict, skill: dict) -> dict:
     """Attach origin classification (from the loader) onto a skill record."""
     rec["is_agent_created"] = skill.get("is_agent_created", False)
@@ -425,6 +458,7 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
             rec = _build_record(ledger, "skill", key, val, states,
                                 detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
                                 skill_content=full["content"])
+            rec["skill_versions"] = _skill_version_history(ledger, key, full["content"])
             rec = _tag_skill_origin(rec, full)
     elif target_type == "hold":
         h = ledger.get_held(key)

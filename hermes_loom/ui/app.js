@@ -102,6 +102,37 @@ function diffEl(a, b) {
     ...loomDiff(a, b).map((p) => el("span", { class: "di-" + p.t }, p.s)));
 }
 
+// ───────────────────────── line-level diff ─────────────────────────
+// LCS over whole lines — the right granularity for a full SKILL.md. Cheap
+// enough for real files (line counts, not char counts), so no DIFF_MAX guard.
+function lineDiff(a, b) {
+  const A = (a || "").split("\n"), B = (b || "").split("\n");
+  const n = A.length, m = B.length;
+  const dp = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
+  for (let i = n - 1; i >= 0; i--)
+    for (let j = m - 1; j >= 0; j--)
+      dp[i][j] = A[i] === B[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (A[i] === B[j]) { out.push({ t: "eq", s: A[i] }); i++; j++; }
+    else if (dp[i + 1][j] >= dp[i][j + 1]) out.push({ t: "del", s: A[i++] });
+    else out.push({ t: "add", s: B[j++] });
+  }
+  while (i < n) out.push({ t: "del", s: A[i++] });
+  while (j < m) out.push({ t: "add", s: B[j++] });
+  return out;
+}
+function lineDiffEl(a, b) {
+  const runs = lineDiff(a, b);
+  const mark = { eq: "", del: "−", add: "+" };
+  if (!runs.some((p) => p.t !== "eq"))
+    return el("div", { class: "loom-meta", style: { padding: "10px 12px" } }, "兩個版本內容相同");
+  return el("div", { class: "loom-diff" },
+    ...runs.map((p) => el("div", p.t === "eq" ? {} : { class: p.t },
+      el("span", { class: "mk" }, mark[p.t]),
+      el("span", { style: { whiteSpace: "pre-wrap", wordBreak: "break-word" } }, p.s || " "))));
+}
+
 // ───────────────────────── state ─────────────────────────
 const S = {
   records: [], cats: [], selId: null, skillSummary: null,
@@ -256,7 +287,10 @@ function ensureSkillContent(r) {
   if (r.target_type !== "skill" || r.skill_content !== undefined) return Promise.resolve();
   r.skill_content = null; // sentinel: loading
   return api.get("/records/" + encodeURIComponent(r.id))
-    .then((d) => { r.skill_content = (d && d.skill_content) || ""; })
+    .then((d) => {
+      r.skill_content = (d && d.skill_content) || "";
+      r.skill_versions = (d && d.skill_versions) || [];
+    })
     .catch(() => { r.skill_content = ""; });
 }
 
@@ -711,6 +745,29 @@ function versionRow(r, ver, idx) {
       ? el("span", { class: "loom-meta", style: { color: "var(--accent-ink)", fontWeight: "600" } }, "目前生效")
       : el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 8px", fontSize: "11px", color: "var(--accent-ink)" }, onclick: () => doEdit(r, ver.value, { restored: true }) }, icon("undo", { s: 11 }), "還原此版"));
 }
+// skill version diff: two pickers (從 / 到) over the full content timeline,
+// rendered as a line-level diff that re-renders on selection change.
+function skillDiffView(r) {
+  const vs = r.skill_versions;
+  const selStyle = { fontFamily: "IBM Plex Mono, ui-monospace, monospace", fontSize: "11.5px",
+    padding: "3px 6px", borderRadius: "6px", border: "1px solid var(--border)",
+    background: "var(--surface)", color: "var(--text)" };
+  const label = (v) => v.v + " · " + v.who + (v.when ? " · " + v.when : "");
+  const mkSelect = (cur, onpick) => el("select", { style: selStyle, onchange: (e) => onpick(+e.target.value) },
+    ...vs.map((v, i) => el("option", { value: String(i), selected: i === cur ? "selected" : null }, label(v))));
+  let bi = vs.length - 2, ti = vs.length - 1;
+  const area = el("div", {});
+  const draw = () => area.replaceChildren(lineDiffEl(vs[bi].value, vs[ti].value));
+  const bSel = mkSelect(bi, (i) => { bi = i; draw(); });
+  const tSel = mkSelect(ti, (i) => { ti = i; draw(); });
+  draw();
+  return el("div", {},
+    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", flexWrap: "wrap", fontSize: "12px", color: "var(--text-2)" } },
+      "比較", bSel, "→", tSel,
+      el("span", { class: "loom-meta", style: { marginLeft: "2px" } }, vs.length + " 個版本")),
+    area);
+}
+
 function pipeline(r) {
   const vs = r.versions, stored = vs[r.active], prev = r.active > 0 ? vs[r.active - 1] : null;
   const edited = vs.length > 1;
@@ -734,15 +791,24 @@ function pipeline(r) {
   // ── Section B — Hermes 沉澱的內容 ──
   let sectionB;
   if (r.target_type === "skill") {
-    // skills: show the full SKILL.md (lazily loaded), editable via 編輯內容
+    // skills: full SKILL.md, or a line-level diff across the version history
     const c = r.skill_content;
-    const body = c == null
+    const skillVersions = r.skill_versions || [];
+    const canDiff = skillVersions.length >= 2;
+    const fullView = () => c == null
       ? el("div", { class: "loom-meta" }, "載入 SKILL.md 內容中…")
       : el("pre", { style: { margin: "0", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px 14px", background: "var(--surface)", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "460px", overflow: "auto" } }, c || "（此 skill 沒有內容）");
+    let mode = canDiff ? "diff" : "full";
+    const area = el("div", {}, mode === "diff" ? skillDiffView(r) : fullView());
+    const tab = (m, text) => el("button", { class: "loom-btn ghost",
+      style: { height: "26px", padding: "0 9px", fontSize: "11.5px", fontWeight: mode === m ? "600" : "400", color: mode === m ? "var(--accent-ink)" : "var(--text-3)" },
+      onclick: () => { if (mode === m) return; mode = m; area.replaceChildren(m === "diff" ? skillDiffView(r) : fullView()); rightCtl.replaceChildren(...controls()); } }, text);
+    const editBtn = el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => enterEdit(r) }, icon("pencil", { s: 11 }), "編輯內容");
+    const controls = () => canDiff ? [tab("diff", "差異"), tab("full", "完整內容"), editBtn] : [editBtn];
+    const rightCtl = el("div", { style: { display: "flex", gap: "6px", alignItems: "center" } }, ...controls());
     sectionB = el("div", {},
-      sectionHead("spark", "Hermes 沉澱的內容（SKILL.md）",
-        el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => enterEdit(r) }, icon("pencil", { s: 11 }), "編輯內容")),
-      body);
+      sectionHead("spark", "Hermes 沉澱的內容（SKILL.md）", rightCtl),
+      area);
   } else {
     const storedContent = prev
       ? el("div", {},
