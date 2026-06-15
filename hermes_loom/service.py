@@ -217,11 +217,10 @@ def apply_skill_delete(ledger: Ledger, name: str, hard: bool = False, reason=Non
 
 # Loom-side category defaults (Hermes has no categories; reclassify overrides).
 _CAT_DEFAULT = {"memory": "memory", "user": "pref", "skill": "skill"}
-_HINT_CONF = {"plugin_hook": 3, "statedb_ingest": 3, "manual_override": 3,
-              "snapshot_diff": 2, "bootstrap": 1}
 # Known provenance hints. The UI renders the human-readable label from the
 # "hint.<hint>" i18n key, so the backend only emits the stable hint string.
-_KNOWN_HINTS = set(_HINT_CONF)
+_KNOWN_HINTS = {"plugin_hook", "statedb_ingest", "manual_override",
+                "snapshot_diff", "bootstrap"}
 
 
 def _who_key(human: bool, hint: Optional[str] = None) -> str:
@@ -280,8 +279,7 @@ def _state(states: dict, target_type: str, key: str) -> dict:
 
 # --- source trace / provenance -----------------------------------------------
 # How well can we trace a record back to where it came from? Rather than a
-# binary "found / not found", classify into states the UI can explain and that
-# carry an honest confidence.
+# binary "found / not found", classify into states the UI can explain honestly.
 #
 #   exact_match  — a precise originating conversation snippet exists
 #   window_match — no precise snippet, but the session window is available
@@ -289,10 +287,6 @@ def _state(states: dict, target_type: str, key: str) -> dict:
 #   external     — a non-conversation source (manual edit, Hermes runtime file)
 #   inferred     — system-inferred (snapshot diff), rough origin only
 #   missing      — a source was expected but cannot be located
-_TRACE_CONFIDENCE = {
-    "exact_match": "high", "window_match": "medium", "imported": "medium",
-    "external": "medium", "inferred": "low", "missing": "low",
-}
 # i18n key naming why this isn't an exact match (None for exact_match).
 _TRACE_FALLBACK = {
     "window_match": "fallback.window", "imported": "fallback.imported",
@@ -360,7 +354,6 @@ def _source_trace(ledger: Ledger, target_type: str, key: str, value: str,
     traced = status in ("exact_match", "window_match")
     out = {
         "status": status,
-        "confidence": _TRACE_CONFIDENCE[status],
         "session_id": session_id,
         "hint": hint,
         "origin_type": (skill_meta or {}).get("origin_type") if target_type == "skill" else None,
@@ -431,7 +424,6 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
         # detail = the provenance hint's label, else a generic "auto record".
         "detailKey": detail_key or (("hint." + hint) if hint in _KNOWN_HINTS else "detail.autoRecord"),
         "detailParams": detail_params or {},
-        "conf": _HINT_CONF.get(hint, 2),
         # Prefer the originating event's time; fall back to the record's sortable
         # ts (e.g. a skill's file mtime) so skills/snapshots still show a time.
         # The UI formats whenTs into a localized relative time.
@@ -452,8 +444,8 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
                           "whenTs": st.get("reclass_at")}
                          if st.get("reclass_to") else None),
         "origin_event_id": (origin or {}).get("id"),
-        # Source-trace status + confidence so the UI can show *how well* this
-        # record is traced, not just whether a snippet was found.
+        # Source-trace status so the UI can show *how well* this record is
+        # traced, not just whether a snippet was found.
         "provenance": _source_trace(ledger, target_type, key, value, origin,
                                     skill_meta=skill_meta, deep=deep),
     }
@@ -475,7 +467,7 @@ def _build_held_record(h: dict, states: dict) -> dict:
     return {
         "id": f"hold:{key}", "target_type": "hold", "target_key": key, "cat": "hold",
         "detailKey": "detail.held", "detailParams": {"from": from_label},
-        "conf": 2, "whenTs": h.get("held_at"),
+        "whenTs": h.get("held_at"),
         "originId": None, "origin": "loom", "session_id": h.get("source_session_id"),
         "raw": {"who": "who.user", "parts": [], "placeholderKey": "raw.held"},
         "ts": h.get("held_at") or 0,
@@ -489,7 +481,7 @@ def _build_held_record(h: dict, states: dict) -> dict:
         # HOLD entries are a Loom-only staging area you parked by hand — a
         # deliberate, non-conversation source.
         "provenance": {
-            "status": "external", "confidence": "medium",
+            "status": "external",
             "session_id": h.get("source_session_id"), "hint": "manual_override",
             "origin_type": None, "has_snippet": False, "has_window": False,
             "imported": False, "observed": "external", "last_traced_at": None,

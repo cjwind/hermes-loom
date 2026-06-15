@@ -37,7 +37,6 @@ class TestRecords(LoomTestCase):
         r = next(r for r in users if "tea" in r["versions"][r["active"]]["value"])
         self.assertEqual(r["cat"], "pref")               # user store default
         self.assertEqual(r["versions"][0]["kind"], "auto")
-        self.assertEqual(r["conf"], 3)                   # plugin_hook origin
 
     def test_records_sorted_by_time_desc(self):
         self.write_memory("user", "older entry\n§\nnewer entry")

@@ -171,11 +171,6 @@ body.dark .design-canvas { background: oklch(0.13 0.008 262) !important; }
 .loom-meta { font-size: 11.5px; color: var(--text-3); font-family: "IBM Plex Mono", monospace; }
 .loom-divider { height: 1px; background: var(--border); border: 0; margin: 0; }
 
-/* freshness / confidence meter */
-.loom-conf { display: inline-flex; gap: 2px; align-items: center; }
-.loom-conf i { width: 3px; height: 9px; border-radius: 1px; background: var(--border-2); display: block; }
-.loom-conf i.on { background: var(--accent); }
-
 /* provenance quote-back */
 .loom-quote {
   border-left: 2px solid var(--accent-line); padding: 8px 12px; border-radius: 0 8px 8px 0;

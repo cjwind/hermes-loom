@@ -1,4 +1,4 @@
-"""Source-trace provenance: status, confidence, and graceful fallbacks.
+"""Source-trace provenance: status and graceful fallbacks.
 
 These cover the Inspector "source trust" UX — that each record reports *how
 well* it can be traced (exact / window / imported / external / inferred /
@@ -29,7 +29,6 @@ class TestSourceTrace(LoomTestCase):
                            started_at=1.0, ended_at=None, user_id=None)
         p = service.record_detail(led, "user:" + entry_key("I like tea."))["provenance"]
         self.assertEqual(p["status"], "exact_match")
-        self.assertEqual(p["confidence"], "high")
         self.assertEqual(p["observed"], "runtime")
         self.assertTrue(p["has_snippet"])
         self.assertEqual(p["snippet"], "do I like tea?")
@@ -51,7 +50,6 @@ class TestSourceTrace(LoomTestCase):
         )
         p = service.record_detail(led, "user:" + entry_key("Likes oolong."))["provenance"]
         self.assertEqual(p["status"], "window_match")
-        self.assertEqual(p["confidence"], "medium")
         self.assertFalse(p["has_snippet"])
         self.assertTrue(p["has_window"])
         self.assertEqual(p["fallback_reason"], "fallback.window")
@@ -101,7 +99,6 @@ class TestSourceTrace(LoomTestCase):
         )
         p = service.record_detail(led, "user:" + entry_key("Diffed in."))["provenance"]
         self.assertEqual(p["status"], "inferred")
-        self.assertEqual(p["confidence"], "low")
         self.assertEqual(p["fallback_reason"], "fallback.inferred")
 
     # 6. missing ---------------------------------------------------------------
@@ -110,7 +107,6 @@ class TestSourceTrace(LoomTestCase):
         led = self.ledger()
         p = service.record_detail(led, "user:" + entry_key("Orphan entry."))["provenance"]
         self.assertEqual(p["status"], "missing")
-        self.assertEqual(p["confidence"], "low")
         self.assertEqual(p["fallback_reason"], "fallback.missing")
         self.assertFalse(p["has_snippet"])
 
@@ -136,7 +132,7 @@ class TestSourceTrace(LoomTestCase):
             source_message_window=[{"role": "user", "snippet": "tea?", "timestamp": 1.0}],
         )
         p = service.record_detail(led, "user:" + entry_key("I like tea."))["provenance"]
-        for f in ("status", "confidence", "session_id", "hint", "origin_type",
+        for f in ("status", "session_id", "hint", "origin_type",
                   "has_snippet", "has_window", "imported", "observed", "last_traced_at",
                   "fallback_reason", "summary_key", "session_title", "snippet", "window"):
             self.assertIn(f, p)

@@ -326,11 +326,6 @@ function touchedTag(human) {
     ? el("span", { class: "loom-tag tag-human" }, icon("pencil", { s: 10 }), tr("tag.humanEdited"))
     : el("span", { class: "loom-tag tag-auto" }, icon("spark", { s: 10 }), tr("tag.autoDeposit"));
 }
-function conf(n) {
-  return el("span", { class: "loom-conf", title: tr("conf.title", { n }) },
-    ...[1, 2, 3].map((i) => el("i", { class: i <= n ? "on" : "" })));
-}
-
 // ───────────────────────── header ─────────────────────────
 function buildHeader() {
   const stats = el("span", { class: "loom-meta", style: { marginRight: "4px" } });
@@ -561,8 +556,7 @@ function detailMetaRow(r) {
     r.target_type === "skill" && r.origin_type && originBadge(r),
     r.pinned && el("span", { class: "loom-tag", style: { height: "19px", background: "var(--accent-soft)", color: "var(--accent-ink)" } }, icon("pin", { s: 10 }), tr("tag.pinned")),
     el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-4)" } }, r.id),
-    el("div", { style: { flex: "1" } }),
-    conf(r.conf));
+    el("div", { style: { flex: "1" } }));
 }
 function originBadge(r) {
   const map = {
@@ -752,22 +746,23 @@ const memoryDiffView = (vs) => versionDiffView(vs, (a, b) =>
   el("div", { style: { padding: "2px 0" } }, diffEl(a, b)));
 
 // ── source trace / provenance ──
-// Confidence drives the colour: high = accent, medium = amber, low = grey.
+// Status drives the colour: exact match = accent, traced-but-approximate
+// (window/imported/external) = amber, weak (inferred/missing) = grey.
 const PROV_ICON = { exact_match: "check", window_match: "layers", imported: "pack", external: "link", inferred: "spark", missing: "x" };
-function provTone(conf) {
-  return conf === "high" ? { bg: "var(--accent-soft)", fg: "var(--accent-ink)" }
-    : conf === "medium" ? { bg: "var(--human-soft)", fg: "var(--human)" }
+function statusTone(status) {
+  return status === "exact_match" ? { bg: "var(--accent-soft)", fg: "var(--accent-ink)" }
+    : (status === "window_match" || status === "imported" || status === "external") ? { bg: "var(--human-soft)", fg: "var(--human)" }
     : { bg: "var(--surface-3)", fg: "var(--text-3)" };
 }
 function provBadge(p) {
-  const t = provTone(p.confidence);
+  const t = statusTone(p.status);
   return el("span", { class: "loom-tag", style: { height: "20px", background: t.bg, color: t.fg } },
     icon(PROV_ICON[p.status] || "spark", { s: 11 }), tr("provenance.status." + p.status));
 }
 // compact source-status chip shown on each rail row
 function provChip(p) {
   if (!p) return null;
-  const t = provTone(p.confidence);
+  const t = statusTone(p.status);
   return el("span", { class: "loom-tag", style: { height: "16px", padding: "0 5px", fontSize: "9px", background: t.bg, color: t.fg }, title: tr("provenance.status." + p.status) }, tr("provenance.short." + p.status));
 }
 // Evidence, best-effort: exact snippet → session window → fallback explanation.
@@ -793,16 +788,14 @@ function pipeline(r) {
   const vs = r.versions, stored = vs[r.active];
 
   // ── Section A — source trace / provenance card ──
-  const p = r.provenance || { status: "missing", confidence: "low" };
+  const p = r.provenance || { status: "missing" };
   const jumpBtn = r.session_id
     ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, tr("detail.jumpToChat"))
     : null;
-  const confChip = el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } },
-    tr("provenance.confidenceLabel"), el("b", { style: { color: provTone(p.confidence).fg } }, tr("provenance.confidence." + p.confidence)));
   const sectionA = el("div", {},
     sectionHead("link", tr("provenance.head"), jumpBtn),
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", flexWrap: "wrap" } },
-      provBadge(p), confChip),
+      provBadge(p)),
     el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6", marginBottom: "10px" } }, tr(p.summary_key || ("provenance.summary." + p.status))),
     provEvidence(p),
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", flexWrap: "wrap" } },

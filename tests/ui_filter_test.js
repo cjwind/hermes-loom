@@ -31,7 +31,7 @@ global.setInterval = () => 0; // no-op so the 30s status poll doesn't hang the p
 
 const skill = (name, origin, agent) => ({
   id: "skill:" + name, target_type: "skill", target_key: name, cat: "skill",
-  detail: "技能", conf: 2, when: "今天", originId: "—", origin: "Hermes", session_id: null,
+  detail: "技能", when: "今天", originId: "—", origin: "Hermes", session_id: null,
   raw: { who: "Hermes", parts: ["x"] }, extract: [name], classify: ["技能", "x"],
   active: 0, versions: [{ v: "v1", kind: "auto", who: "H", when: "今天", value: name }],
   pinned: false, annotation: null, is_agent_created: agent, origin_type: origin,
@@ -41,7 +41,7 @@ const RECS = {
   cats: [{ k: "memory", label: "記憶" }, { k: "skill", label: "技能" }, { k: "pref", label: "偏好" }],
   skill_summary: { total: 3, agent_created: 1, hermes_official: 1, community: 1 },
   records: [
-    { id: "user:e1", target_type: "user", target_key: "e1", cat: "pref", detail: "d", conf: 3,
+    { id: "user:e1", target_type: "user", target_key: "e1", cat: "pref", detail: "d",
       when: "今天", originId: "—", origin: "memory", session_id: null,
       raw: { who: "你", parts: ["x"] }, extract: ["pref"], classify: ["偏好", "x"], active: 0,
       versions: [{ v: "v1", kind: "auto", who: "H", when: "今天", value: "PREF_ENTRY" }],
