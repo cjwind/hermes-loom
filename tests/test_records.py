@@ -189,14 +189,14 @@ class TestRecords(LoomTestCase):
 
     def test_skill_record_shows_a_time(self):
         # Skills have no growth-event origin (events store SKILL.md content, not
-        # the description), so `when` must fall back to the file mtime instead of
-        # rendering "—" in the rail list.
+        # the description), so `whenTs` must fall back to the file mtime so the UI
+        # can render a time instead of "—" in the rail list.
         self.write_memory("user", "x")
         self.write_skill("productivity", "demo", "---\nname: demo\ncreated_by: agent\n---\nbody\n")
         led = self.ledger()
         skill = next(r for r in service.build_records(led)["records"] if r["target_type"] == "skill")
         self.assertTrue(skill["ts"])          # mtime-based sortable ts
-        self.assertNotEqual(skill["when"], "")  # and it's actually shown
+        self.assertTrue(skill["whenTs"])      # and a timestamp the UI can format
 
     def test_add_entry_for_delete_undo(self):
         led = self._seed()

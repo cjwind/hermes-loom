@@ -126,7 +126,7 @@ function lineDiffEl(a, b) {
   const runs = lineDiff(a, b);
   const mark = { eq: "", del: "−", add: "+" };
   if (!runs.some((p) => p.t !== "eq"))
-    return el("div", { class: "loom-meta", style: { padding: "10px 12px" } }, "兩個版本內容相同");
+    return el("div", { class: "loom-meta", style: { padding: "10px 12px" } }, tr("diff.identical"));
   return el("div", { class: "loom-diff" },
     ...runs.map((p) => el("div", p.t === "eq" ? {} : { class: p.t },
       el("span", { class: "mk" }, mark[p.t]),
@@ -144,9 +144,18 @@ const S = {
 };
 const D = {}; // persistent DOM refs
 
+// i18n (i18n.js is loaded first). tr()/relTime() read the current language live,
+// so a language switch is a pure re-render — see the header toggle. Named `tr`
+// (not `t`) because `t` is used pervasively here as a loop variable (tags/toasts).
+const tr = window.LoomI18n.t;
+const relTime = window.LoomI18n.relTime;
+
 const DIFF_MAX = 4000; // skip live char-diff above this (O(n·m) LCS would hang)
-const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString() : "—";
-const catLabel = (k) => (S.cats.find((c) => c.k === k) || {}).label || k;
+const fmtTime = (ts) => ts ? new Date(ts * 1000).toLocaleString() : tr("common.dash");
+const catLabel = (k) => tr("cat." + k);
+// Backend sends display text as i18n keys + params; render them here.
+const detailText = (r) => r.detailKey ? tr(r.detailKey, r.detailParams) : "";
+const whenText = (r) => relTime(r.whenTs) || tr("common.dash");
 const activeValue = (r) => r.versions[r.active].value;
 const isTouched = (r) => r.versions.some((v) => v.kind === "human") || !!r.annotation || !!r.reclassified;
 const selected = () => S.records.find((r) => r.id === S.selId) || null;
@@ -175,7 +184,7 @@ function visibleRecords() {
     .filter((r) => r.target_type !== "skill" || r.is_agent_created)
     .filter((r) => S.filter === "all" || r.cat === S.filter)
     .filter((r) => !S.humanOnly || isTouched(r))
-    .filter((r) => !q || (activeValue(r) + r.detail + r.origin).toLowerCase().includes(q));
+    .filter((r) => !q || (activeValue(r) + detailText(r) + r.origin).toLowerCase().includes(q));
 }
 
 // ───────────────────────── toasts ─────────────────────────
@@ -197,7 +206,7 @@ function renderToasts() {
     host.append(el("div", { class: "loom-toast" },
       el("span", { class: "ic", style: { background: toneBg, color: toneFg } }, icon(tIcon, { s: 13 })),
       el("span", {}, t.text),
-      t.onUndo && el("button", { class: "undo", onclick: () => { closeToast(t.id); t.onUndo(); } }, icon("undo", { s: 12 }), "復原"),
+      t.onUndo && el("button", { class: "undo", onclick: () => { closeToast(t.id); t.onUndo(); } }, icon("undo", { s: 12 }), tr("toast.undo")),
       el("button", { class: "loom-iconbtn", style: { width: "26px", height: "26px" }, onclick: () => closeToast(t.id) }, icon("x", { s: 12 }))));
   }
 }
@@ -208,7 +217,7 @@ function renderToasts() {
 function guard(fn) {
   return async (...args) => {
     try { return await fn(...args); }
-    catch (e) { pushToast({ tone: "err", text: "操作失敗：" + (e && e.message || e) }); }
+    catch (e) { pushToast({ tone: "err", text: tr("toast.opFailed", { msg: (e && e.message) || e }) }); }
   };
 }
 
@@ -219,7 +228,7 @@ const doEdit = guard(async function (r, value, { restored } = {}) {
   await loadRecords((x) => x.target_type === r.target_type && activeValue(x) === value);
   pushToast({
     tone: restored ? "undo" : "human",
-    text: restored ? "已還原並設為生效（存成新版本）" : "已存成新版本，Hermes 的自動版本仍保留",
+    text: restored ? tr("toast.restored") : tr("toast.savedNewVersion"),
     onUndo: async () => { await api.post("/records/edit", { target_type: r.target_type, target_key: entryKeyOf(value, r), new_value: prev }).catch(() => {}); await loadRecords((x) => x.target_type === r.target_type && activeValue(x) === prev); },
   });
 });
@@ -236,7 +245,7 @@ const doDelete = guard(async function (r) {
   await loadRecords();
   pushToast({
     tone: "del",
-    text: "已刪除「" + val.slice(0, 14) + (val.length > 14 ? "…" : "") + "」" + (canUndo ? "" : "（技能已停用，檔案已備份）"),
+    text: tr("toast.deleted", { val: val.slice(0, 14) + (val.length > 14 ? "…" : "") }) + (canUndo ? "" : tr("toast.skillDisabledBackup")),
     onUndo: canUndo ? async () => {
       await api.post("/records/add", { store_type: r.target_type, text: val, from_store: r.from_store }).catch(() => {});
       await loadRecords((x) => x.target_type === r.target_type && activeValue(x) === val);
@@ -249,7 +258,7 @@ const doAnnotate = guard(async function (r, text) {
   await api.post("/records/annotate", { target_type: r.target_type, target_key: r.target_key, text });
   await loadRecords((x) => x.id === r.id);
   pushToast({
-    tone: "human", text: text.trim() ? "已加上你的註解" : "已移除註解",
+    tone: "human", text: text.trim() ? tr("toast.annotationAdded") : tr("toast.annotationRemoved"),
     onUndo: async () => { await api.post("/records/annotate", { target_type: r.target_type, target_key: r.target_key, text: prev }).catch(() => {}); await loadRecords((x) => x.id === r.id); },
   });
 });
@@ -261,7 +270,7 @@ const doPin = guard(async function (r) {
 
 // Change category = physically move the entry. 記憶→MEMORY.md, 偏好→USER.md,
 // 暫存(hold)→Loom-only (removed from all files; not compiled).
-const CAT_FILE = { memory: "MEMORY.md", pref: "USER.md", hold: "不寫入任何檔案（暫存）" };
+const catFile = (k) => tr("catFile." + k);
 const doRecat = guard(async function (r, toCat) {
   const fromCat = r.cat;
   S.mode = null;
@@ -271,8 +280,8 @@ const doRecat = guard(async function (r, toCat) {
   pushToast({
     tone: "human",
     text: toCat === "hold"
-      ? "已改為暫存，不會 compile 到任何檔案（已從原檔移除）"
-      : `已改分類為「${catLabel(toCat)}」，資料移到 ${CAT_FILE[toCat] || "?"}`,
+      ? tr("toast.recatHold")
+      : tr("toast.recatDone", { cat: catLabel(toCat), file: catFile(toCat) }),
     onUndo: async () => {
       await api.post("/records/recategorize",
         { target_type: res.to_target_type, target_key: res.new_key, to_cat: fromCat }).catch(() => {});
@@ -299,7 +308,7 @@ const doSkillEdit = guard(async function (r, newContent, oldContent) {
   await api.post("/records/edit", { target_type: "skill", target_key: r.target_key, new_value: newContent });
   await loadRecords((x) => x.target_type === "skill" && x.target_key === r.target_key);
   pushToast({
-    tone: "human", text: "已更新 SKILL.md 內容",
+    tone: "human", text: tr("toast.skillUpdated"),
     onUndo: async () => {
       await api.post("/records/edit", { target_type: "skill", target_key: r.target_key, new_value: oldContent }).catch(() => {});
       await loadRecords((x) => x.target_type === "skill" && x.target_key === r.target_key);
@@ -313,11 +322,11 @@ function catChip(cat) {
 }
 function touchedTag(human) {
   return human
-    ? el("span", { class: "loom-tag tag-human" }, icon("pencil", { s: 10 }), "人工調整過")
-    : el("span", { class: "loom-tag tag-auto" }, icon("spark", { s: 10 }), "Hermes 自動沉澱");
+    ? el("span", { class: "loom-tag tag-human" }, icon("pencil", { s: 10 }), tr("tag.humanEdited"))
+    : el("span", { class: "loom-tag tag-auto" }, icon("spark", { s: 10 }), tr("tag.autoDeposit"));
 }
 function conf(n) {
-  return el("span", { class: "loom-conf", title: "可信度 " + n + "/3" },
+  return el("span", { class: "loom-conf", title: tr("conf.title", { n }) },
     ...[1, 2, 3].map((i) => el("i", { class: i <= n ? "on" : "" })));
 }
 
@@ -327,26 +336,28 @@ function buildHeader() {
   D.stats = stats;
   const themeBtn = el("button", { class: "loom-btn", onclick: toggleTheme });
   D.themeBtn = themeBtn; paintThemeBtn();
-  const recallBtn = el("button", { class: "loom-btn", onclick: viewRecallLog, title: "最近 pre_llm_call 注入了哪些記憶" },
-    icon("flow", { s: 14 }), "注入紀錄");
-  const pill = el("span", { class: "loom-pill" }, el("span", { class: "loom-dot" }), "檢查狀態中…");
+  const langBtn = el("button", { class: "loom-btn", title: tr("lang.switchTitle"),
+    onclick: () => window.LoomI18n.toggleLang() }, tr("lang.name"));
+  const recallBtn = el("button", { class: "loom-btn", onclick: viewRecallLog, title: tr("header.recallBtnTitle") },
+    icon("flow", { s: 14 }), tr("header.recallBtn"));
+  const pill = el("span", { class: "loom-pill" }, el("span", { class: "loom-dot" }), tr("status.checking"));
   D.pill = pill;
   return el("div", { class: "loom-top" },
     el("div", { class: "loom-brand" },
       el("div", { class: "loom-logo" }),
-      el("div", { class: "loom-name", html: 'Hermes Loom <span class="sub">/ 檢視台</span>' })),
+      el("div", { class: "loom-name", html: 'Hermes Loom <span class="sub">/ ' + tr("header.subtitle") + '</span>' })),
     buildNav(),
     pill,
     el("div", { class: "loom-top-spacer" }),
-    stats, recallBtn, themeBtn);
+    stats, recallBtn, langBtn, themeBtn);
 }
 
 // Top-level view switcher: the Inspector (observed growth) vs the SOUL editor.
 const NAV_VIEWS = [
-  { k: "inspector", label: "檢視台", icon: "flow" },
-  { k: "soul", label: "SOUL", icon: "spark" },
-  { k: "packs", label: "記憶層", icon: "pack" },
-  { k: "prompts", label: "Prompt", icon: "layers" },
+  { k: "inspector", labelKey: "nav.inspector", icon: "flow" },
+  { k: "soul", labelKey: "nav.soul", icon: "spark" },
+  { k: "packs", labelKey: "nav.packs", icon: "pack" },
+  { k: "prompts", labelKey: "nav.prompts", icon: "layers" },
 ];
 function buildNav() {
   const nav = el("div", { style: { display: "flex", gap: "2px", padding: "2px", borderRadius: "8px", background: "var(--surface-2)", marginLeft: "14px" } });
@@ -367,7 +378,7 @@ function paintNav() {
         fontWeight: on ? "600" : "500",
       },
       onclick: () => setView(v.k),
-    }, icon(v.icon, { s: 13 }), v.label);
+    }, icon(v.icon, { s: 13 }), tr(v.labelKey));
   }));
 }
 function setView(v) {
@@ -386,10 +397,10 @@ function setView(v) {
 async function viewRecallLog() {
   const overlay = el("div", { style: { position: "fixed", inset: "0", background: "rgba(0,0,0,.55)", zIndex: "200", display: "flex", alignItems: "center", justifyContent: "center" }, onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
   const panel = el("div", { class: "loom-menu", style: { position: "static", width: "680px", maxWidth: "92vw", maxHeight: "82vh", overflow: "auto", padding: "16px 18px" } },
-    el("div", { class: "loom-meta" }, "載入中…"));
+    el("div", { class: "loom-meta" }, tr("common.loading")));
   overlay.append(panel); document.body.append(overlay);
   const head = (extra) => el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" } },
-    icon("flow", { s: 14 }), el("b", {}, "最近注入的記憶"),
+    icon("flow", { s: 14 }), el("b", {}, tr("recall.title")),
     extra, el("div", { style: { flex: "1" } }),
     el("button", { class: "loom-iconbtn", onclick: () => overlay.remove() }, icon("x", { s: 13 })));
   try {
@@ -400,17 +411,17 @@ async function viewRecallLog() {
           el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), fmtTime(rc.timestamp)),
           el("span", { class: "loom-tag " + (rc.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, rc.method),
           ...(rc.tags || []).map((t) => el("span", { class: "loom-tag", style: { height: "18px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t)),
-          el("span", { class: "loom-meta" }, "注入 " + rc.count + " 筆")),
+          el("span", { class: "loom-meta" }, tr("recall.injectedN", { n: rc.count }))),
         el("div", { class: "who", style: { marginBottom: "4px" } }, "USER · " + (rc.message || "")),
         ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0" } },
           el("span", { style: { color: "var(--accent)" } }, "＋ "),
           r.title && el("b", {}, "【" + r.title + "】"), r.value || ""))));
-    panel.replaceChildren(head(el("span", { class: "loom-meta" }, (d.recalls || []).length + " 筆")),
+    panel.replaceChildren(head(el("span", { class: "loom-meta" }, tr("unit.entries", { n: (d.recalls || []).length }))),
       ...(rows.length ? rows : [el("div", { class: "loom-empty", style: { padding: "30px" } },
-        el("div", {}, "還沒有注入紀錄"),
-        el("div", { class: "loom-meta", style: { textAlign: "center", maxWidth: "420px" } }, "當對話經過 gateway 的 pre_llm_call hook、且使用者訊息命中某個標籤時，這裡會列出注入了哪些記憶。"))]));
+        el("div", {}, tr("recall.empty")),
+        el("div", { class: "loom-meta", style: { textAlign: "center", maxWidth: "420px" } }, tr("recall.emptyDesc")))]));
   } catch (e) {
-    panel.replaceChildren(head(null), el("div", { class: "banner err", style: { color: "var(--del)" } }, "讀取失敗：" + e.message));
+    panel.replaceChildren(head(null), el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message })));
   }
 }
 
@@ -421,26 +432,27 @@ async function refreshStatus() {
   try {
     const s = await api.get("/status");
     const dot = el("span", { class: "loom-dot" + (s.state === "live" ? " loom-live" : ""), style: { background: PILL_COLOR[s.state] || "var(--text-4)" } });
-    let tip = `plugin：${s.plugin.installed ? (s.plugin.enabled ? "已啟用" : "已安裝但停用") : "未安裝"}`;
-    tip += ` · gateway：${s.gateway.known ? (s.gateway.running ? "運作中" : "未運作") : "未知"}`;
-    tip += s.last_plugin_hook_rel ? ` · 最近即時觀測：${s.last_plugin_hook_rel}` : " · 尚無即時觀測";
-    D.pill.replaceChildren(dot, document.createTextNode(s.label));
+    const plug = s.plugin.installed ? (s.plugin.enabled ? tr("status.pluginEnabled") : tr("status.pluginInstalledDisabled")) : tr("status.pluginNotInstalled");
+    const gw = s.gateway.known ? (s.gateway.running ? tr("status.gwRunning") : tr("status.gwStopped")) : tr("status.gwUnknown");
+    let tip = tr("status.pluginLabel") + plug + tr("status.gwLabel") + gw;
+    tip += s.last_plugin_hook ? tr("status.lastHook", { rel: relTime(s.last_plugin_hook) }) : tr("status.noHook");
+    D.pill.replaceChildren(dot, document.createTextNode(tr("status.state." + s.state)));
     D.pill.setAttribute("title", tip);
   } catch (e) {
-    D.pill.replaceChildren(el("span", { class: "loom-dot", style: { background: "var(--text-4)" } }), document.createTextNode("狀態未知"));
-    D.pill.setAttribute("title", "無法取得狀態：" + e.message);
+    D.pill.replaceChildren(el("span", { class: "loom-dot", style: { background: "var(--text-4)" } }), document.createTextNode(tr("status.unknown")));
+    D.pill.setAttribute("title", tr("status.fetchFailed", { msg: e.message }));
   }
 }
 function renderStats() {
   const live = S.records.length;
   const touched = S.records.filter(isTouched).length;
   D.stats.replaceChildren(
-    document.createTextNode(live + " 筆 · "),
-    el("span", { style: { color: "var(--human)" } }, touched + " 筆你動過"));
+    document.createTextNode(tr("stats.total", { n: live })),
+    el("span", { style: { color: "var(--human)" } }, tr("stats.touched", { n: touched })));
 }
 function paintThemeBtn() {
   const dark = document.body.classList.contains("dark");
-  D.themeBtn.replaceChildren(icon(dark ? "moon" : "sun", { s: 14 }), dark ? "深色" : "淺色");
+  D.themeBtn.replaceChildren(icon(dark ? "moon" : "sun", { s: 14 }), dark ? tr("theme.dark") : tr("theme.light"));
 }
 function toggleTheme() {
   const dark = !document.body.classList.contains("dark");
@@ -452,7 +464,7 @@ function toggleTheme() {
 // ───────────────────────── rail ─────────────────────────
 function buildRail() {
   const search = el("input", {
-    class: "loom-input", style: { paddingLeft: "30px" }, placeholder: "搜尋成長紀錄…",
+    class: "loom-input", style: { paddingLeft: "30px" }, placeholder: tr("rail.searchPlaceholder"),
     oninput: (e) => { S.query = e.target.value; renderRailList(); },
   });
   D.search = search;
@@ -471,7 +483,7 @@ function buildRail() {
     list);
 }
 function renderChips() {
-  const chipDefs = [{ k: "all", label: "全部" }, ...S.cats.filter((c) => c.k !== "struct")];
+  const chipDefs = [{ k: "all" }, ...S.cats.filter((c) => c.k !== "struct")];
   D.chips.replaceChildren(...chipDefs.map((c) => {
     const on = S.filter === c.k;
     return el("button", {
@@ -483,7 +495,7 @@ function renderChips() {
         border: "1px solid " + (on ? "var(--accent-line)" : "var(--border)"),
       },
       onclick: () => { S.filter = c.k; renderChips(); renderRailList(); },
-    }, c.label);
+    }, catLabel(c.k));
   }));
 }
 function listRow(r) {
@@ -502,9 +514,9 @@ function listRow(r) {
     el("span", { style: { flex: "1", minWidth: "0" } },
       el("span", { style: { display: "-webkit-box", WebkitLineClamp: "2", WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: "12.5px", fontWeight: sel ? "600" : "500", color: sel ? "var(--text)" : "var(--text-2)", lineHeight: "1.4" } }, activeValue(r)),
       el("span", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" } },
-        el("span", { class: "loom-meta", style: { fontSize: "10.5px" } }, r.when || "—"),
+        el("span", { class: "loom-meta", style: { fontSize: "10.5px" } }, whenText(r)),
         r.pinned && icon("pin", { s: 10, color: "var(--accent)" }),
-        isTouched(r) && el("span", { title: "人工調整過", style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } }))));
+        isTouched(r) && el("span", { title: tr("tag.humanEdited"), style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } }))));
 }
 function renderRailList() {
   const vis = visibleRecords();
@@ -513,32 +525,32 @@ function renderRailList() {
   const touchedCount = S.records.filter(isTouched).length;
 
   D.statusRow.replaceChildren(
-    icon("filter", { s: 12 }), document.createTextNode(vis.length + " 筆 · 依時間"),
+    icon("filter", { s: 12 }), document.createTextNode(tr("rail.countByTime", { n: vis.length })),
     el("div", { style: { flex: "1" } }),
     el("button", {
-      class: "loom-tag tag-human", title: "只看你動過的",
+      class: "loom-tag tag-human", title: tr("rail.onlyTouched"),
       style: { height: "20px", fontSize: "10px", cursor: "pointer", opacity: S.humanOnly ? "1" : ".55", outline: S.humanOnly ? "1.5px solid var(--human)" : "none" },
       onclick: () => { S.humanOnly = !S.humanOnly; renderRailList(); },
     }, icon("pencil", { s: 10 }), String(touchedCount)));
 
   const list = D.list; list.replaceChildren();
   if (pinned.length) {
-    list.append(el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "5px 10px 3px" } }, "已釘選"));
+    list.append(el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "5px 10px 3px" } }, tr("rail.pinned")));
     pinned.forEach((r) => list.append(listRow(r)));
     list.append(el("div", { style: { height: "1px", background: "var(--border)", margin: "7px 10px" } }));
   }
   rest.forEach((r) => list.append(listRow(r)));
   if (!vis.length) {
-    const msg = S.filter === "skill" ? "目前沒有新沉澱的 skills" : "沒有符合的沉澱";
+    const msg = S.filter === "skill" ? tr("rail.noSkills") : tr("rail.noMatch");
     list.append(el("div", { style: { padding: "30px 14px", textAlign: "center", color: "var(--text-4)", fontSize: "12px" } }, msg));
   }
   // when viewing skills, show how many are shown vs how many exist in Hermes
   if (S.filter === "skill" && S.skillSummary) {
     const ss = S.skillSummary;
     list.append(el("div", { class: "loom-mono", style: { padding: "10px 12px 4px", fontSize: "10px", color: "var(--text-4)", lineHeight: "1.6" } },
-      `顯示 ${ss.agent_created} / ${ss.total} 個技能（只列新沉澱）`,
+      tr("rail.skillShown", { a: ss.agent_created, t: ss.total }),
       el("br"),
-      `其餘：Hermes 官方 ${ss.hermes_official} · 社群 ${ss.community}（已隱藏）`));
+      tr("rail.skillRest", { official: ss.hermes_official, community: ss.community })));
   }
 }
 
@@ -549,7 +561,7 @@ function renderDetail() {
   if (!r) {
     host.append(el("div", { class: "loom-empty" },
       icon("flow", { s: 28, color: "var(--text-3)" }),
-      el("div", { style: { fontSize: "13px" } }, "從左側選一筆沉澱，看它從哪來、怎麼長成的")));
+      el("div", { style: { fontSize: "13px" } }, tr("detail.empty"))));
     return;
   }
   // lazily load full SKILL.md so the detail can show + edit the whole content
@@ -560,7 +572,7 @@ function renderDetail() {
   host.append(el("div", { style: { padding: "18px 26px 15px", borderBottom: "1px solid var(--border)", background: "var(--surface)" } },
     detailMetaRow(r),
     S.mode === "edit" ? editor(r, val) : el("div", { style: { fontSize: "18px", fontWeight: "600", letterSpacing: "-0.3px", lineHeight: "1.35", textWrap: "pretty" } }, val),
-    S.mode !== "edit" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "4px" } }, r.detail),
+    S.mode !== "edit" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "4px" } }, detailText(r)),
     S.mode === null && actionRow(r),
     S.mode === "recat" && recatComposer(r),
     S.mode === "anno" && annoComposer(r)));
@@ -568,7 +580,7 @@ function renderDetail() {
   const body = el("div", { style: { flex: "1", overflow: "auto", padding: "20px 26px" } });
   if (r.annotation)
     body.append(el("div", { class: "loom-anno", style: { marginBottom: "18px" } },
-      el("div", { class: "hd" }, icon("note", { s: 11 }), "你的註解 · " + r.annotation.when),
+      el("div", { class: "hd" }, icon("note", { s: 11 }), tr("detail.yourNote", { when: relTime(r.annotation.whenTs) })),
       el("div", { style: { fontSize: "12.5px", color: "var(--text)", lineHeight: "1.55" } }, r.annotation.text)));
   body.append(pipeline(r));
   host.append(body);
@@ -579,16 +591,16 @@ function detailMetaRow(r) {
     catChip(r.cat),
     touchedTag(isTouched(r)),
     r.target_type === "skill" && r.origin_type && originBadge(r),
-    r.pinned && el("span", { class: "loom-tag", style: { height: "19px", background: "var(--accent-soft)", color: "var(--accent-ink)" } }, icon("pin", { s: 10 }), "已釘選"),
+    r.pinned && el("span", { class: "loom-tag", style: { height: "19px", background: "var(--accent-soft)", color: "var(--accent-ink)" } }, icon("pin", { s: 10 }), tr("tag.pinned")),
     el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-4)" } }, r.id),
     el("div", { style: { flex: "1" } }),
     conf(r.conf));
 }
 function originBadge(r) {
   const map = {
-    agent_created: { bg: "var(--accent-soft)", fg: "var(--accent-ink)", t: "新沉澱 · agent 產生" },
-    hermes_official: { bg: "var(--surface-3)", fg: "var(--text-2)", t: "Hermes 官方 / 原生" },
-    community: { bg: "var(--surface-3)", fg: "var(--text-3)", t: "外部 / 社群" },
+    agent_created: { bg: "var(--accent-soft)", fg: "var(--accent-ink)", t: tr("origin.agent") },
+    hermes_official: { bg: "var(--surface-3)", fg: "var(--text-2)", t: tr("origin.official") },
+    community: { bg: "var(--surface-3)", fg: "var(--text-3)", t: tr("origin.community") },
   };
   const m = map[r.origin_type] || map.community;
   return el("span", { class: "loom-tag", style: { height: "19px", background: m.bg, color: m.fg }, title: r.author ? "author: " + r.author : "" },
@@ -598,11 +610,11 @@ function originBadge(r) {
 function actionRow(r) {
   const isSkill = r.target_type === "skill";
   return el("div", { style: { display: "flex", gap: "8px", marginTop: "14px", position: "relative" } },
-    el("button", { class: "loom-btn", onclick: () => enterEdit(r) }, icon("pencil", { s: 13 }), isSkill ? "編輯內容" : "編輯"),
-    !isSkill && el("button", { class: "loom-btn", onclick: () => { S.mode = "recat"; renderDetail(); } }, icon("flow", { s: 13 }), "改分類"),
-    el("button", { class: "loom-btn", onclick: () => enterAnno(r) }, icon("note", { s: 13 }), r.annotation ? "編輯註解" : "加註解"),
+    el("button", { class: "loom-btn", onclick: () => enterEdit(r) }, icon("pencil", { s: 13 }), isSkill ? tr("action.editContent") : tr("action.edit")),
+    !isSkill && el("button", { class: "loom-btn", onclick: () => { S.mode = "recat"; renderDetail(); } }, icon("flow", { s: 13 }), tr("action.recat")),
+    el("button", { class: "loom-btn", onclick: () => enterAnno(r) }, icon("note", { s: 13 }), r.annotation ? tr("action.editNote") : tr("action.addNote")),
     el("div", { style: { flex: "1" } }),
-    el("button", { class: "loom-btn", onclick: () => doPin(r) }, icon("pin", { s: 13 }), r.pinned ? "取消釘選" : "釘選"),
+    el("button", { class: "loom-btn", onclick: () => doPin(r) }, icon("pin", { s: 13 }), r.pinned ? tr("action.unpin") : tr("action.pin")),
     el("div", { style: { position: "relative" } },
       el("button", { class: "loom-btn", onclick: (e) => { e.stopPropagation(); S.menuOpen = !S.menuOpen; renderDetail(); } }, icon("dots", { s: 14 })),
       S.menuOpen && actionMenu(r)));
@@ -614,7 +626,7 @@ function actionMenu(r) {
   }, 0);
   const menu = el("div", { class: "loom-menu", style: { top: "38px", right: "0" } },
     el("button", { class: "loom-mi danger", onclick: () => { S.menuOpen = false; doDelete(r); } },
-      icon("trash", { s: 13 }), "刪除這筆沉澱"));
+      icon("trash", { s: 13 }), tr("action.delete")));
   return menu;
 }
 
@@ -639,18 +651,18 @@ function editor(r, val) {
   ta.value = S.draft; D.editTa = ta;
   const diffBox = el("div", { style: { marginTop: "5px", padding: "8px 11px", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-2)", fontSize: "13px", minHeight: "20px", maxHeight: "180px", overflow: "auto" } });
   D.diffBox = diffBox; D.diffBase = base;
-  const saveLabel = isSkill ? "儲存 SKILL.md" : "存成新版本";
+  const saveLabel = isSkill ? tr("editor.saveSkill") : tr("editor.saveNewVersion");
   const hint = isSkill
-    ? "會寫回 SKILL.md（先自動備份） · <span class='loom-kbd'>⌘↵</span>"
-    : "會新增 v" + (r.versions.length + 1) + "，自動版仍保留 · <span class='loom-kbd'>⌘↵</span>";
+    ? tr("editor.hintSkill")
+    : tr("editor.hintMem", { n: r.versions.length + 1 });
   const wrap = el("div", {},
     ta,
     el("div", { style: { marginTop: "9px", fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "7px" } },
-      icon("pencil", { s: 11, color: "var(--human)" }), "即時預覽改動："),
+      icon("pencil", { s: 11, color: "var(--human)" }), tr("editor.livePreview")),
     diffBox,
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "11px" } },
       el("button", { class: "loom-btn primary", onclick: () => commitEdit(r, base) }, icon("check", { s: 13 }), saveLabel),
-      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消"),
+      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, tr("common.cancel")),
       el("div", { style: { flex: "1" } }),
       el("span", { class: "loom-meta", html: hint })));
   setTimeout(refreshDiff, 0);
@@ -660,13 +672,13 @@ function refreshDiff() {
   if (!D.diffBox) return;
   const base = D.diffBase || "", draft = (S.draft || "");
   if (draft === base) {
-    D.diffBox.replaceChildren(el("span", { style: { color: "var(--text-4)", fontFamily: "IBM Plex Mono, monospace" } }, "尚未改動"));
+    D.diffBox.replaceChildren(el("span", { style: { color: "var(--text-4)", fontFamily: "IBM Plex Mono, monospace" } }, tr("editor.noChange")));
     return;
   }
   if (base.length > DIFF_MAX || draft.length > DIFF_MAX) {
     const delta = draft.length - base.length;
     D.diffBox.replaceChildren(el("span", { style: { color: "var(--text-3)", fontFamily: "IBM Plex Mono, monospace" } },
-      `內容較長，略過即時字元 diff（${draft.length} 字，${delta >= 0 ? "+" : ""}${delta}）`));
+      tr("editor.tooLong", { n: draft.length, delta: (delta >= 0 ? "+" : "") + delta })));
     return;
   }
   D.diffBox.replaceChildren(diffEl(base, draft));
@@ -690,8 +702,7 @@ function enterAnno(r) {
 function recatComposer(r) {
   const movable = S.cats.filter((c) => c.k === "memory" || c.k === "pref" || c.k === "hold");
   return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
-    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "10px" }, html:
-      "改分類會把這條<b style='color:var(--text)'>實際搬移</b>：記憶→MEMORY.md、偏好→USER.md、暫存→只留在 Loom（不寫入任何檔案、compile 不會輸出）。皆先自動備份。" }),
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "10px" }, html: tr("recat.desc") }),
     el("div", { style: { display: "flex", gap: "7px", flexWrap: "wrap" } },
       ...movable.map((c) => {
         const cur = c.k === r.cat;
@@ -704,24 +715,24 @@ function recatComposer(r) {
           onclick: cur ? null : () => doRecat(r, c.k),
         },
           el("span", { style: { width: "7px", height: "7px", borderRadius: c.k === "hold" ? "50%" : "2px", background: "var(--cat-" + c.k + ")", display: "inline-block", marginRight: "6px" } }),
-          c.label + (cur ? " · 目前" : " → " + (CAT_FILE[c.k] || "")));
+          catLabel(c.k) + (cur ? tr("recat.current") : " → " + catFile(c.k)));
       })),
     el("div", { style: { display: "flex", marginTop: "11px" } },
-      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
+      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, tr("common.cancel"))));
 }
 function annoComposer(r) {
   const ta = el("textarea", {
-    class: "loom-edit sm", rows: 2, placeholder: "例如：這條只在工作情境適用，私人聚餐不算…",
+    class: "loom-edit sm", rows: 2, placeholder: tr("anno.placeholder"),
     oninput: () => { S.draft = ta.value; },
     onkeydown: (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { doAnnotate(r, ta.value); S.mode = null; } if (e.key === "Escape") { S.mode = null; renderDetail(); } },
   });
   ta.value = S.draft; D.annoTa = ta;
   return el("div", { class: "loom-composer", style: { marginTop: "14px" } },
-    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html: "加一段給自己的註解 — <b style='color:var(--text)'>不會改動沉澱內容</b>，只是備註。" }),
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" }, html: tr("anno.desc") }),
     ta,
     el("div", { style: { display: "flex", gap: "8px", marginTop: "10px" } },
-      el("button", { class: "loom-btn primary", onclick: () => { doAnnotate(r, ta.value); S.mode = null; } }, icon("check", { s: 13 }), "儲存註解"),
-      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, "取消")));
+      el("button", { class: "loom-btn primary", onclick: () => { doAnnotate(r, ta.value); S.mode = null; } }, icon("check", { s: 13 }), tr("anno.save")),
+      el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, tr("common.cancel"))));
 }
 
 // ───────────────────────── provenance + content (two sections) ─────────────
@@ -737,13 +748,13 @@ function versionRow(r, ver, idx) {
   return el("div", { style: { display: "flex", alignItems: "center", gap: "10px", fontSize: "12px", padding: "7px 11px", borderRadius: "var(--r2)", border: "1px solid " + (active ? "var(--accent-line)" : "var(--border)"), background: active ? "var(--accent-soft)" : "var(--inset)" } },
     el("span", { class: "loom-mono", style: { fontSize: "11px", fontWeight: "600", color: active ? "var(--accent-ink)" : "var(--text-3)" } }, ver.v),
     ver.kind === "human"
-      ? el("span", { class: "loom-tag tag-human", style: { height: "19px" } }, icon("pencil", { s: 10 }), ver.who)
-      : el("span", { class: "loom-tag tag-auto", style: { height: "19px" } }, icon("spark", { s: 10 }), ver.who),
-    el("span", { class: "loom-meta" }, ver.when),
+      ? el("span", { class: "loom-tag tag-human", style: { height: "19px" } }, icon("pencil", { s: 10 }), tr(ver.who))
+      : el("span", { class: "loom-tag tag-auto", style: { height: "19px" } }, icon("spark", { s: 10 }), tr(ver.who)),
+    el("span", { class: "loom-meta" }, relTime(ver.whenTs)),
     el("div", { style: { flex: "1" } }),
     active
-      ? el("span", { class: "loom-meta", style: { color: "var(--accent-ink)", fontWeight: "600" } }, "目前生效")
-      : el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 8px", fontSize: "11px", color: "var(--accent-ink)" }, onclick: () => doEdit(r, ver.value, { restored: true }) }, icon("undo", { s: 11 }), "還原此版"));
+      ? el("span", { class: "loom-meta", style: { color: "var(--accent-ink)", fontWeight: "600" } }, tr("version.current"))
+      : el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 8px", fontSize: "11px", color: "var(--accent-ink)" }, onclick: () => doEdit(r, ver.value, { restored: true }) }, icon("undo", { s: 11 }), tr("version.restore")));
 }
 // version diff: two pickers (從 / 到) over a full version timeline, rendered by
 // `render(a,b)` and re-rendered on selection change. Shared by skills (line-level
@@ -752,7 +763,7 @@ function versionDiffView(vs, render) {
   const selStyle = { fontFamily: "IBM Plex Mono, ui-monospace, monospace", fontSize: "11.5px",
     padding: "3px 6px", borderRadius: "6px", border: "1px solid var(--border)",
     background: "var(--surface)", color: "var(--text)" };
-  const label = (v) => v.v + " · " + v.who + (v.when ? " · " + v.when : "");
+  const label = (v) => { const w = relTime(v.whenTs); return v.v + " · " + tr(v.who) + (w ? " · " + w : ""); };
   const mkSelect = (cur, onpick) => el("select", { style: selStyle, onchange: (e) => onpick(+e.target.value) },
     ...vs.map((v, i) => el("option", { value: String(i), selected: i === cur ? "selected" : null }, label(v))));
   let bi = vs.length - 2, ti = vs.length - 1;
@@ -763,8 +774,8 @@ function versionDiffView(vs, render) {
   draw();
   return el("div", {},
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", flexWrap: "wrap", fontSize: "12px", color: "var(--text-2)" } },
-      "比較", bSel, "→", tSel,
-      el("span", { class: "loom-meta", style: { marginLeft: "2px" } }, vs.length + " 個版本")),
+      tr("version.compare"), bSel, "→", tSel,
+      el("span", { class: "loom-meta", style: { marginLeft: "2px" } }, tr("version.nVersions", { n: vs.length }))),
     area);
 }
 const skillDiffView = (r) => versionDiffView(r.skill_versions, lineDiffEl);
@@ -777,19 +788,22 @@ function pipeline(r) {
 
   // ── Section A — 來自這次對話 (provenance) ──
   const jumpBtn = r.session_id
-    ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, "跳到對話 ›")
+    ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, tr("detail.jumpToChat"))
     : null;
+  const rawParts = (r.raw.parts && r.raw.parts.length)
+    ? r.raw.parts.map((p) => typeof p === "string" ? el("span", {}, p) : el("em", {}, p.hl))
+    : [el("span", {}, r.raw.placeholderKey ? tr(r.raw.placeholderKey) : "")];
   const sectionA = el("div", {},
-    sectionHead("link", "來自這次對話", jumpBtn),
+    sectionHead("link", tr("detail.fromChat"), jumpBtn),
     el("div", { class: "loom-quote" },
-      el("span", { class: "who" }, r.raw.who + " · " + r.origin),
-      ...r.raw.parts.map((p) => typeof p === "string" ? el("span", {}, p) : el("em", {}, p.hl))),
+      el("span", { class: "who" }, tr(r.raw.who) + " · " + r.origin),
+      ...rawParts),
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "9px", flexWrap: "wrap" } },
-      el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, r.originId),
+      el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, r.originId || tr("common.dash")),
       el("span", { style: { color: "var(--text-4)" } }, "·"),
-      el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } }, icon("clock", { s: 12 }), r.when || "—"),
+      el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } }, icon("clock", { s: 12 }), whenText(r)),
       el("span", { style: { color: "var(--text-4)" } }, "·"),
-      el("span", { class: "loom-meta" }, "Hermes 從這段沉澱為 " + catLabel(r.cat))));
+      el("span", { class: "loom-meta" }, tr("detail.depositedAs", { cat: catLabel(r.cat) }))));
 
   // ── Section B — Hermes 沉澱的內容 ──
   let sectionB;
@@ -799,18 +813,18 @@ function pipeline(r) {
     const skillVersions = r.skill_versions || [];
     const canDiff = skillVersions.length >= 2;
     const fullView = () => c == null
-      ? el("div", { class: "loom-meta" }, "載入 SKILL.md 內容中…")
-      : el("pre", { style: { margin: "0", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px 14px", background: "var(--surface)", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "460px", overflow: "auto" } }, c || "（此 skill 沒有內容）");
+      ? el("div", { class: "loom-meta" }, tr("skill.loading"))
+      : el("pre", { style: { margin: "0", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px 14px", background: "var(--surface)", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "460px", overflow: "auto" } }, c || tr("skill.empty"));
     let mode = canDiff ? "diff" : "full";
     const area = el("div", {}, mode === "diff" ? skillDiffView(r) : fullView());
     const tab = (m, text) => el("button", { class: "loom-btn ghost",
       style: { height: "26px", padding: "0 9px", fontSize: "11.5px", fontWeight: mode === m ? "600" : "400", color: mode === m ? "var(--accent-ink)" : "var(--text-3)" },
       onclick: () => { if (mode === m) return; mode = m; area.replaceChildren(m === "diff" ? skillDiffView(r) : fullView()); rightCtl.replaceChildren(...controls()); } }, text);
-    const editBtn = el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => enterEdit(r) }, icon("pencil", { s: 11 }), "編輯內容");
-    const controls = () => canDiff ? [tab("diff", "差異"), tab("full", "完整內容"), editBtn] : [editBtn];
+    const editBtn = el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => enterEdit(r) }, icon("pencil", { s: 11 }), tr("action.editContent"));
+    const controls = () => canDiff ? [tab("diff", tr("skill.tabDiff")), tab("full", tr("skill.tabFull")), editBtn] : [editBtn];
     const rightCtl = el("div", { style: { display: "flex", gap: "6px", alignItems: "center" } }, ...controls());
     sectionB = el("div", {},
-      sectionHead("spark", "Hermes 沉澱的內容（SKILL.md）", rightCtl),
+      sectionHead("spark", tr("skill.contentHead"), rightCtl),
       area);
   } else {
     // ≥2 versions → full edit-chain diff picker (從→到 over every recorded
@@ -819,14 +833,14 @@ function pipeline(r) {
     const hasHuman = vs.some((v) => v.kind === "human");
     const storedContent = multi
       ? el("div", {},
-          el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" } }, "這條記憶的歷次變化："),
+          el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "8px" } }, tr("mem.changes")),
           el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "9px 12px", background: "var(--surface)", fontSize: "13px" } }, memoryDiffView(vs)))
       : el("div", { style: { border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 13px", background: "var(--surface)", fontSize: "14px", color: "var(--text)", lineHeight: "1.5" } }, stored.value);
     sectionB = el("div", {},
-      sectionHead("spark", hasHuman ? "Hermes 沉澱的內容 · 含你的調整" : "Hermes 沉澱的內容"),
+      sectionHead("spark", hasHuman ? tr("mem.contentHeadEdited") : tr("mem.contentHead")),
       storedContent,
       multi && el("div", { style: { marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" } },
-        el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, "版本歷史 · " + vs.length + " 版 · Hermes 的自動版本永遠保留"),
+        el("div", { class: "loom-mono", style: { fontSize: "10.5px", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)" } }, tr("mem.versionHistory", { n: vs.length })),
         ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
   }
 
@@ -841,7 +855,7 @@ async function viewSession(sid) {
       icon("link", { s: 14 }), el("b", {}, "Session " + sid),
       el("div", { style: { flex: "1" } }),
       el("button", { class: "loom-iconbtn", onclick: () => overlay.remove() }, icon("x", { s: 13 }))),
-    el("div", { class: "loom-meta" }, "載入中…"));
+    el("div", { class: "loom-meta" }, tr("common.loading")));
   overlay.append(panel); document.body.append(overlay);
   try {
     const d = await api.get("/sessions/" + encodeURIComponent(sid) + "/context?limit=24");
@@ -854,9 +868,9 @@ async function viewSession(sid) {
       ...(d.messages || []).map((m) => el("div", { class: "loom-quote", style: { marginBottom: "8px", borderLeftColor: m.role === "user" ? "var(--accent-line)" : "var(--border-2)" } },
         el("span", { class: "who" }, (m.role || "") + (m.tool_name ? " · " + m.tool_name : "")),
         el("span", {}, (m.snippet || "") + (m.truncated ? " …" : "")))),
-      !(d.messages || []).length && el("div", { class: "loom-meta" }, "（此 session 沒有可顯示的訊息）"));
+      !(d.messages || []).length && el("div", { class: "loom-meta" }, tr("session.noMessages")));
   } catch (e) {
-    panel.append(el("div", { class: "banner err", style: { color: "var(--del)" } }, "讀取失敗：" + e.message));
+    panel.append(el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message })));
   }
 }
 
@@ -868,11 +882,11 @@ function soulStatusChildren() {
   const d = S.soul;
   if (!d) return [];
   const out = [];
-  if (d.in_sync === true) out.push(el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, icon("check", { s: 11 }), "已與磁碟同步"));
-  else if (d.in_sync === false) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--human-soft)", color: "var(--human)" } }, icon("spark", { s: 11 }), "DB 較新 · 尚未編譯"));
-  if (!d.disk.exists) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--human-soft)", color: "var(--human)" } }, "磁碟上沒有 SOUL.md"));
-  if (d.updated_at) out.push(el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), "DB 版本：" + fmtTime(d.updated_at)));
-  if (soulDirty()) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--surface-3)", color: "var(--del)" } }, "有未儲存的編輯"));
+  if (d.in_sync === true) out.push(el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, icon("check", { s: 11 }), tr("soul.synced")));
+  else if (d.in_sync === false) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--human-soft)", color: "var(--human)" } }, icon("spark", { s: 11 }), tr("soul.dbNewer")));
+  if (!d.disk.exists) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--human-soft)", color: "var(--human)" } }, tr("soul.noDisk")));
+  if (d.updated_at) out.push(el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), tr("soul.dbVersion", { when: fmtTime(d.updated_at) })));
+  if (soulDirty()) out.push(el("span", { class: "loom-tag", style: { height: "20px", background: "var(--surface-3)", color: "var(--del)" } }, tr("soul.unsaved")));
   return out;
 }
 function paintSoulStatus() {
@@ -880,10 +894,10 @@ function paintSoulStatus() {
 }
 async function renderSoul() {
   const host = D.soulBody;
-  host.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, "載入 SOUL.md…"));
+  host.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, tr("soul.loading")));
   let data;
   try { data = await api.get("/soul"); }
-  catch (e) { host.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  catch (e) { host.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))); return; }
   S.soul = data;
   const ta = el("textarea", {
     class: "loom-input",
@@ -901,26 +915,26 @@ async function renderSoul() {
         el("div", { style: { fontSize: "19px", fontWeight: "700", letterSpacing: "-.3px" } }, "SOUL.md"),
         el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-4)" } }, data.disk.path)),
       el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "5px", lineHeight: "1.6" } },
-        "Hermes 的身份／人格檔（system prompt 的第一段）。在這裡編輯會存進 Loom 的資料庫；按「編譯到 SOUL.md」才會寫回上面的檔案（並先備份）。")),
+        tr("soul.desc"))),
     D.soulStatus,
     ta,
     el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
-      el("button", { class: "loom-btn primary", onclick: doSoulSave }, icon("check", { s: 14 }), "儲存到 Loom"),
-      el("button", { class: "loom-btn", onclick: doSoulCompile }, icon("flow", { s: 14 }), "編譯到 SOUL.md"),
-      el("button", { class: "loom-btn ghost", onclick: () => renderSoul() }, icon("undo", { s: 13 }), "重新載入"),
+      el("button", { class: "loom-btn primary", onclick: doSoulSave }, icon("check", { s: 14 }), tr("soul.saveToLoom")),
+      el("button", { class: "loom-btn", onclick: doSoulCompile }, icon("flow", { s: 14 }), tr("soul.compile")),
+      el("button", { class: "loom-btn ghost", onclick: () => renderSoul() }, icon("undo", { s: 13 }), tr("soul.reload")),
       el("div", { style: { flex: "1" } }),
-      el("span", { class: "loom-meta" }, (data.history || []).length + " 個版本"))));
+      el("span", { class: "loom-meta" }, tr("soul.nVersions", { n: (data.history || []).length })))));
   paintSoulStatus();
 }
 const doSoulSave = guard(async function () {
   const res = await api.post("/soul/save", { content: D.soulText.value });
-  pushToast({ tone: "human", text: res.unchanged ? "內容沒有變更" : "已儲存到 Loom" });
+  pushToast({ tone: "human", text: res.unchanged ? tr("soul.unchanged") : tr("soul.saved") });
   await renderSoul();
 });
 const doSoulCompile = guard(async function () {
-  if (soulDirty()) { pushToast({ tone: "err", text: "有未儲存的編輯，請先「儲存到 Loom」" }); return; }
+  if (soulDirty()) { pushToast({ tone: "err", text: tr("soul.mustSaveFirst") }); return; }
   const res = await api.post("/soul/compile", {});
-  pushToast({ tone: "human", text: "已編譯到 " + res.path + (res.backup ? "（已備份原檔）" : "") });
+  pushToast({ tone: "human", text: tr("soul.compiledTo", { path: res.path }) + (res.backup ? tr("soul.backedUp") : "") });
   await renderSoul();
 });
 
@@ -931,15 +945,15 @@ async function renderPrompts() {
     D.promptDetail = el("div", { style: { flex: "1", overflow: "auto", background: "var(--bg)", minWidth: "0" } });
     D.promptsBody.replaceChildren(D.promptList, D.promptDetail);
   }
-  D.promptList.replaceChildren(el("div", { class: "loom-meta", style: { padding: "16px" } }, "載入對話清單…"));
+  D.promptList.replaceChildren(el("div", { class: "loom-meta", style: { padding: "16px" } }, tr("prompt.loadingList")));
   let data;
   try { data = await api.get("/prompts?limit=50"); }
-  catch (e) { D.promptList.replaceChildren(el("div", { class: "banner err", style: { margin: "14px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  catch (e) { D.promptList.replaceChildren(el("div", { class: "banner err", style: { margin: "14px", color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))); return; }
   S.promptList = data.sessions || [];
   if (!S.promptList.length) {
     D.promptList.replaceChildren(el("div", { class: "loom-empty", style: { padding: "30px 14px", textAlign: "center" } },
-      el("div", {}, "沒有可顯示的對話"),
-      el("div", { class: "loom-meta", style: { marginTop: "6px" } }, "找不到帶有 system_prompt 的 session（需要 Hermes 的 state.db）")));
+      el("div", {}, tr("prompt.noPrompts")),
+      el("div", { class: "loom-meta", style: { marginTop: "6px" } }, tr("prompt.noPromptsDesc"))));
     D.promptDetail.replaceChildren();
     return;
   }
@@ -949,26 +963,26 @@ async function renderPrompts() {
 }
 function paintPromptList() {
   D.promptList.replaceChildren(
-    el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "12px 12px 6px" } }, "最近的對話 · 最新在上"),
+    el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "12px 12px 6px" } }, tr("prompt.recentChats")),
     ...S.promptList.map((s) => {
       const on = s.id === S.promptSel;
       return el("button", {
         style: { display: "block", width: "100%", textAlign: "left", border: "none", font: "inherit", cursor: "pointer", padding: "9px 12px", background: on ? "var(--surface-3)" : "transparent", boxShadow: on ? "inset 2px 0 0 var(--accent)" : "none" },
         onclick: () => { S.promptSel = s.id; paintPromptList(); loadPromptDetail(s.id); },
       },
-        el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, s.title || ("對話 " + (s.id || "").slice(0, 8))),
+        el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, s.title || tr("prompt.chatN", { id: (s.id || "").slice(0, 8) })),
         el("div", { style: { display: "flex", gap: "7px", alignItems: "center", marginTop: "3px", flexWrap: "wrap" } },
           el("span", { class: "loom-meta", style: { fontSize: "10px" } }, fmtTime(s.started_at)),
           s.model && el("span", { class: "loom-tag tag-auto", style: { height: "16px", padding: "0 5px", fontSize: "9px" } }, s.model),
-          el("span", { class: "loom-meta", style: { fontSize: "10px" } }, fmtInt(s.prompt_chars) + " 字")));
+          el("span", { class: "loom-meta", style: { fontSize: "10px" } }, tr("unit.chars", { n: fmtInt(s.prompt_chars) }))));
     }));
 }
 const fmtInt = (n) => (n == null ? "0" : Number(n).toLocaleString());
 async function loadPromptDetail(sid) {
-  D.promptDetail.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, "載入組合後的 prompt…"));
+  D.promptDetail.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, tr("prompt.loadingDetail")));
   let d;
   try { d = await api.get("/prompts/" + encodeURIComponent(sid)); }
-  catch (e) { D.promptDetail.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  catch (e) { D.promptDetail.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))); return; }
   if (S.promptSel !== sid) return; // user switched away mid-load
 
   const lines = (d.system_prompt || "").split("\n");
@@ -976,7 +990,7 @@ async function loadPromptDetail(sid) {
   for (const ln of lines) { offsets.push(acc); acc += ln.length + 1; }
   const total = acc || 1;
 
-  const pre = el("pre", { style: { margin: "0", padding: "16px 18px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px", fontSize: "12.5px", lineHeight: "1.65", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", overflow: "auto", maxHeight: "62vh" } }, d.system_prompt || "（空）");
+  const pre = el("pre", { style: { margin: "0", padding: "16px 18px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px", fontSize: "12.5px", lineHeight: "1.65", color: "var(--text)", fontFamily: "IBM Plex Mono, ui-monospace, monospace", whiteSpace: "pre-wrap", wordBreak: "break-word", overflow: "auto", maxHeight: "62vh" } }, d.system_prompt || tr("prompt.empty"));
 
   const jump = (line) => {
     const frac = (offsets[line] || 0) / total;
@@ -984,7 +998,7 @@ async function loadPromptDetail(sid) {
   };
   const outline = (d.outline || []).length
     ? el("div", { style: { border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 6px", background: "var(--surface)", maxHeight: "62vh", overflow: "auto" } },
-        el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".05em", padding: "4px 8px 7px" } }, "組成大綱 · " + d.outline.length + " 段"),
+        el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".05em", padding: "4px 8px 7px" } }, tr("prompt.outline", { n: d.outline.length })),
         ...d.outline.map((h) => el("button", {
           style: { display: "block", width: "100%", textAlign: "left", border: "none", background: "transparent", cursor: "pointer", font: "inherit", color: "var(--text-2)", fontSize: "11.5px", padding: "3px 8px 3px " + (4 + (h.level - 1) * 12) + "px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", borderRadius: "5px" },
           onmouseenter: (e) => e.target.style.background = "var(--surface-3)",
@@ -997,9 +1011,9 @@ async function loadPromptDetail(sid) {
     el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, icon("clock", { s: 11 }), fmtTime(d.started_at)),
     d.model && el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, d.model),
     d.source && el("span", { class: "loom-tag tag-auto", style: { height: "20px" } }, d.source),
-    el("span", { class: "loom-meta" }, "訊息 " + fmtInt(d.message_count) + " · " + fmtInt(d.chars) + " 字 · " + fmtInt(d.lines) + " 行"),
+    el("span", { class: "loom-meta" }, tr("prompt.metaSummary", { m: fmtInt(d.message_count), c: fmtInt(d.chars), l: fmtInt(d.lines) })),
     el("div", { style: { flex: "1" } }),
-    el("button", { class: "loom-btn ghost", onclick: () => doCopyPrompt(d.system_prompt) }, icon("link", { s: 13 }), "複製"));
+    el("button", { class: "loom-btn ghost", onclick: () => doCopyPrompt(d.system_prompt) }, icon("link", { s: 13 }), tr("common.copy")));
 
   const body = outline
     ? el("div", { style: { display: "grid", gridTemplateColumns: "minmax(0,1fr) 230px", gap: "16px", alignItems: "start" } }, pre, outline)
@@ -1008,11 +1022,11 @@ async function loadPromptDetail(sid) {
   D.promptDetail.replaceChildren(el("div", { style: { padding: "20px 22px 40px" } },
     el("div", { style: { display: "flex", alignItems: "center", gap: "9px", marginBottom: "4px" } },
       icon("layers", { s: 17, color: "var(--accent)" }),
-      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, d.title || ("對話 " + (d.session_id || "").slice(0, 8))),
+      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, d.title || tr("prompt.chatN", { id: (d.session_id || "").slice(0, 8) })),
       el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, d.session_id)),
-    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "13px" } }, "送進模型的完整請求：① 系統 prompt（SOUL + 記憶 + skills + 工具框架）② pre_llm_call 注入的記憶 ③ 對話訊息。"),
+    el("div", { style: { fontSize: "12px", color: "var(--text-2)", marginBottom: "13px" } }, tr("prompt.desc")),
     meta,
-    promptSectionHead("layers", "① 系統 prompt", fmtInt(d.chars) + " 字 · " + fmtInt(d.lines) + " 行"),
+    promptSectionHead("layers", tr("prompt.systemPrompt"), tr("prompt.charsLines", { c: fmtInt(d.chars), l: fmtInt(d.lines) })),
     body,
     promptRecallsSection(d),
     promptMessagesSection(d)));
@@ -1025,10 +1039,10 @@ function promptSectionHead(ic, title, sub) {
 }
 function promptRecallsSection(d) {
   const recalls = d.recalls || [];
-  const head = promptSectionHead("flow", "② pre_llm_call 注入的記憶", recalls.length + " 次注入");
+  const head = promptSectionHead("flow", tr("prompt.recallsHead"), tr("prompt.nInjections", { n: recalls.length }));
   if (!recalls.length) {
     return el("div", {}, head, el("div", { class: "loom-meta", style: { fontSize: "12px", lineHeight: "1.6" } },
-      "這個對話沒有 Loom 注入紀錄。當某回合的使用者訊息命中標籤時，Loom 會在 pre_llm_call 把相符的記憶接到 user message 後面，並記在這裡。"));
+      tr("prompt.noRecalls")));
   }
   return el("div", {}, head,
     ...recalls.map((rc) => el("div", { class: "loom-quote", style: { marginBottom: "10px" } },
@@ -1036,8 +1050,8 @@ function promptRecallsSection(d) {
         el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), fmtTime(rc.timestamp)),
         el("span", { class: "loom-tag " + (rc.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, rc.method),
         ...(rc.tags || []).map((t) => el("span", { class: "loom-tag", style: { height: "18px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t)),
-        el("span", { class: "loom-meta" }, "注入 " + rc.count + " 筆")),
-      el("div", { class: "who", style: { marginBottom: "5px" } }, "命中的 USER 訊息 · " + (rc.message || "")),
+        el("span", { class: "loom-meta" }, tr("recall.injectedN", { n: rc.count }))),
+      el("div", { class: "who", style: { marginBottom: "5px" } }, tr("prompt.matchedUser", { msg: rc.message || "" })),
       ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0", display: "flex", gap: "6px", flexWrap: "wrap" } },
         el("span", { style: { color: "var(--accent)" } }, "＋"),
         r.title && el("b", {}, "【" + r.title + "】"),
@@ -1052,8 +1066,8 @@ const ROLE_STYLE = {
 };
 function promptMessagesSection(d) {
   const msgs = d.messages || [];
-  const head = promptSectionHead("link", "③ 對話訊息", msgs.length + " 則");
-  if (!msgs.length) return el("div", {}, head, el("div", { class: "loom-meta", style: { fontSize: "12px" } }, "（這個 session 沒有可顯示的訊息）"));
+  const head = promptSectionHead("link", tr("prompt.messagesHead"), tr("prompt.nMessages", { n: msgs.length }));
+  if (!msgs.length) return el("div", {}, head, el("div", { class: "loom-meta", style: { fontSize: "12px" } }, tr("session.noMessages")));
   return el("div", {}, head,
     ...msgs.map((m) => {
       const rs = ROLE_STYLE[m.role] || { bg: "var(--surface-2)", fg: "var(--text-2)", label: (m.role || "?").toUpperCase() };
@@ -1065,7 +1079,7 @@ function promptMessagesSection(d) {
           m.token_count != null && el("span", { class: "loom-meta", style: { fontSize: "10px" } }, m.token_count + " tok"),
           m.timestamp && el("span", { class: "loom-meta", style: { fontSize: "10px" } }, fmtTime(m.timestamp))),
         m.content && el("div", { style: { padding: "9px 12px", fontSize: "12.5px", lineHeight: "1.6", color: "var(--text)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "340px", overflow: "auto", fontFamily: m.role === "tool" ? "IBM Plex Mono, ui-monospace, monospace" : "inherit" } },
-          m.content + (m.truncated ? "\n…（已截斷）" : "")),
+          m.content + (m.truncated ? tr("prompt.truncated") : "")),
         m.reasoning && el("details", { style: { padding: "0 12px 9px" } },
           el("summary", { class: "loom-meta", style: { cursor: "pointer", fontSize: "11px" } }, "reasoning"),
           el("div", { style: { fontSize: "12px", color: "var(--text-2)", whiteSpace: "pre-wrap", wordBreak: "break-word", marginTop: "5px", maxHeight: "240px", overflow: "auto" } }, m.reasoning)),
@@ -1076,7 +1090,7 @@ function promptMessagesSection(d) {
 }
 const doCopyPrompt = guard(async function (text) {
   await navigator.clipboard.writeText(text || "");
-  pushToast({ tone: "human", text: "已複製組合後的 prompt" });
+  pushToast({ tone: "human", text: tr("prompt.copied") });
 });
 
 // ───────────────────────── packs (middle memory layer) ─────────────────────────
@@ -1090,10 +1104,10 @@ async function renderPacks() {
     D.packDetail = el("div", { style: { flex: "1", overflow: "auto", background: "var(--bg)", minWidth: "0" } });
     D.packsBody.replaceChildren(D.packList, D.packDetail);
   }
-  D.packList.replaceChildren(el("div", { class: "loom-meta", style: { padding: "16px" } }, "載入 packs…"));
+  D.packList.replaceChildren(el("div", { class: "loom-meta", style: { padding: "16px" } }, tr("pack.loading")));
   let data;
   try { data = await api.get("/packs"); }
-  catch (e) { D.packList.replaceChildren(el("div", { class: "banner err", style: { margin: "14px", color: "var(--del)" } }, "讀取失敗：" + e.message)); return; }
+  catch (e) { D.packList.replaceChildren(el("div", { class: "banner err", style: { margin: "14px", color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))); return; }
   S.packs = data.packs || [];
   if (S.packSel !== "new" && !S.packs.find((p) => p.id === S.packSel)) {
     S.packSel = S.packs.length ? S.packs[0].id : "new";
@@ -1106,7 +1120,7 @@ function paintPackList() {
   const add = el("button", {
     class: "loom-btn" + (addOn ? " primary" : ""), style: { margin: "11px 12px", width: "calc(100% - 24px)", justifyContent: "center" },
     onclick: () => { S.packSel = "new"; paintPackList(); renderPackDetail(); },
-  }, icon("plus", { s: 14 }), "新增 pack");
+  }, icon("plus", { s: 14 }), tr("pack.add"));
   const rows = S.packs.map((p) => {
     const on = p.id === S.packSel;
     return el("button", {
@@ -1114,17 +1128,17 @@ function paintPackList() {
       onclick: () => { S.packSel = p.id; paintPackList(); renderPackDetail(); },
     },
       el("div", { style: { display: "flex", alignItems: "center", gap: "6px" } },
-        el("span", { style: { width: "6px", height: "6px", borderRadius: "50%", flex: "0 0 auto", background: p.enabled ? "var(--cat-fact, var(--accent))" : "var(--text-4)" }, title: p.enabled ? "啟用中" : "已停用" }),
-        el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, p.title || "（未命名）")),
+        el("span", { style: { width: "6px", height: "6px", borderRadius: "50%", flex: "0 0 auto", background: p.enabled ? "var(--cat-fact, var(--accent))" : "var(--text-4)" }, title: p.enabled ? tr("pack.enabledTitle") : tr("pack.disabledTitle") }),
+        el("div", { style: { fontSize: "12.5px", fontWeight: on ? "600" : "500", color: on ? "var(--text)" : "var(--text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, p.title || tr("pack.unnamed"))),
       (p.tags || []).length ? el("div", { style: { display: "flex", gap: "4px", flexWrap: "wrap", margin: "4px 0 0 12px" } }, ...packTagChips(p.tags.slice(0, 4), { height: "15px", fontSize: "9px" })) : null,
-      p.when_to_use ? el("div", { style: { fontSize: "10px", color: "var(--text-3)", fontStyle: "italic", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: p.when_to_use }, "時機：" + p.when_to_use) : null,
+      p.when_to_use ? el("div", { style: { fontSize: "10px", color: "var(--text-3)", fontStyle: "italic", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, title: p.when_to_use }, tr("pack.whenPrefix", { when: p.when_to_use })) : null,
       el("div", { class: "loom-meta", style: { fontSize: "10.5px", margin: "3px 0 0 12px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" } }, (p.content || "").slice(0, 50)));
   });
   D.packList.replaceChildren(...[
     add,
-    el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "2px 12px 6px" } }, S.packs.length + " 個 pack"),
+    el("div", { class: "loom-mono", style: { fontSize: "9.5px", color: "var(--text-4)", textTransform: "uppercase", letterSpacing: ".06em", padding: "2px 12px 6px" } }, tr("pack.nPacks", { n: S.packs.length })),
     ...rows,
-    S.packs.length ? null : el("div", { class: "loom-meta", style: { padding: "14px", fontSize: "11.5px", lineHeight: "1.6" } }, "還沒有 pack。新增一個：給它標題與標籤，對話時 Loom 會依你的訊息選相關的 pack 注入。"),
+    S.packs.length ? null : el("div", { class: "loom-meta", style: { padding: "14px", fontSize: "11.5px", lineHeight: "1.6" } }, tr("pack.empty")),
   ].filter(Boolean));
 }
 function renderPackDetail() {
@@ -1132,13 +1146,13 @@ function renderPackDetail() {
   const isNew = S.packSel === "new";
   const p = isNew ? { id: null, title: "", tags: [], content: "", enabled: true }
                   : (S.packs.find((x) => x.id === S.packSel) || null);
-  if (!p) { host.replaceChildren(el("div", { class: "loom-empty", style: { padding: "44px" } }, icon("pack", { s: 26, color: "var(--text-3)" }), el("div", { style: { fontSize: "13px" } }, "從左側選一個 pack，或新增一個"))); return; }
+  if (!p) { host.replaceChildren(el("div", { class: "loom-empty", style: { padding: "44px" } }, icon("pack", { s: 26, color: "var(--text-3)" }), el("div", { style: { fontSize: "13px" } }, tr("pack.detailEmpty")))); return; }
 
-  const title = el("input", { class: "loom-input", placeholder: "標題，例如：風浪板", value: p.title });
-  const tags = el("input", { class: "loom-input", placeholder: "標籤，用逗號分隔，例如：運動, 戶外, 心情", value: (p.tags || []).join(", ") });
-  const whenTo = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "62px", resize: "vertical", padding: "10px 14px", lineHeight: "1.6", fontSize: "12.5px", boxSizing: "border-box" }, placeholder: "描述什麼情境下該帶入這個 pack，例如：聊到水上活動、裝備、或想出門透氣時。" });
+  const title = el("input", { class: "loom-input", placeholder: tr("pack.titlePlaceholder"), value: p.title });
+  const tags = el("input", { class: "loom-input", placeholder: tr("pack.tagsPlaceholder"), value: (p.tags || []).join(", ") });
+  const whenTo = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "62px", resize: "vertical", padding: "10px 14px", lineHeight: "1.6", fontSize: "12.5px", boxSizing: "border-box" }, placeholder: tr("pack.whenPlaceholder") });
   whenTo.value = p.when_to_use || "";
-  const content = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "34vh", resize: "vertical", padding: "12px 14px", lineHeight: "1.6", fontSize: "13px", boxSizing: "border-box" }, placeholder: "純文字內容。被選中時這段會原樣注入給模型。" });
+  const content = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "34vh", resize: "vertical", padding: "12px 14px", lineHeight: "1.6", fontSize: "13px", boxSizing: "border-box" }, placeholder: tr("pack.contentPlaceholder") });
   content.value = p.content;
   const enabled = el("input", { type: "checkbox", style: { width: "15px", height: "15px", accentColor: "var(--accent)" } });
   enabled.checked = !!p.enabled;
@@ -1152,32 +1166,32 @@ function renderPackDetail() {
   host.replaceChildren(el("div", { style: { maxWidth: "780px", margin: "0 auto", padding: "24px 26px 40px" } },
     el("div", { style: { display: "flex", alignItems: "center", gap: "9px", marginBottom: "14px" } },
       icon("pack", { s: 17, color: "var(--accent)" }),
-      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, isNew ? "新增 pack" : "編輯 pack"),
+      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, isNew ? tr("pack.addHead") : tr("pack.editHead")),
       !isNew && el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, "#" + p.id)),
-    field("標題", title, "也會被當成比對關鍵字之一"),
-    field("標籤", tags, "keyword fallback 用：命中標題或任一標籤就注入"),
-    field("適用時機", whenTo, "對話時 AI 會連同標題、標籤一起判斷此情境是否該注入這個 pack"),
-    field("內容", content),
+    field(tr("pack.fieldTitle"), title, tr("pack.fieldTitleHint")),
+    field(tr("pack.fieldTags"), tags, tr("pack.fieldTagsHint")),
+    field(tr("pack.fieldWhen"), whenTo, tr("pack.fieldWhenHint")),
+    field(tr("pack.fieldContent"), content),
     el("label", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", cursor: "pointer", fontSize: "12.5px", color: "var(--text-2)" } },
-      enabled, "啟用（停用的 pack 不會被注入）"),
+      enabled, tr("pack.enableLabel")),
     el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
-      el("button", { class: "loom-btn primary", onclick: doPackSave }, icon("check", { s: 14 }), isNew ? "建立" : "儲存"),
-      !isNew && el("button", { class: "loom-btn ghost", style: { color: "var(--del)" }, onclick: doPackDelete }, icon("trash", { s: 13 }), "刪除"),
+      el("button", { class: "loom-btn primary", onclick: doPackSave }, icon("check", { s: 14 }), isNew ? tr("common.create") : tr("common.save")),
+      !isNew && el("button", { class: "loom-btn ghost", style: { color: "var(--del)" }, onclick: doPackDelete }, icon("trash", { s: 13 }), tr("common.delete")),
       el("div", { style: { flex: "1" } })),
     packTestPanel()));
 }
 function packTestPanel() {
-  const input = el("input", { class: "loom-input", placeholder: "輸入一句使用者訊息，測試會選中哪些 pack…",
+  const input = el("input", { class: "loom-input", placeholder: tr("pack.testPlaceholder"),
     onkeydown: (e) => { if (e.key === "Enter") doPackTest(); } });
   D.packTestInput = input;
   D.packTestOut = el("div", { style: { marginTop: "10px" } });
   return el("div", { style: { marginTop: "26px", paddingTop: "18px", borderTop: "1px solid var(--border)" } },
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "9px" } },
       icon("flow", { s: 14, color: "var(--accent)" }),
-      el("div", { style: { fontSize: "13px", fontWeight: "700" } }, "測試比對"),
-      el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "模擬 pre_llm_call 的選取")),
+      el("div", { style: { fontSize: "13px", fontWeight: "700" } }, tr("pack.testHead")),
+      el("span", { class: "loom-meta", style: { fontSize: "11px" } }, tr("pack.testSub"))),
     el("div", { style: { display: "flex", gap: "8px" } }, input,
-      el("button", { class: "loom-btn", style: { flex: "0 0 auto" }, onclick: doPackTest }, "比對")),
+      el("button", { class: "loom-btn", style: { flex: "0 0 auto" }, onclick: doPackTest }, tr("pack.testBtn"))),
     D.packTestOut);
 }
 const doPackSave = guard(async function () {
@@ -1185,25 +1199,25 @@ const doPackSave = guard(async function () {
   if (S.packSel !== "new") body.id = S.packSel;
   const res = await api.post("/packs/save", body);
   S.packSel = res.id;
-  pushToast({ tone: "human", text: res.created ? "已新增 pack" : "已更新 pack" });
+  pushToast({ tone: "human", text: res.created ? tr("pack.created") : tr("pack.updated") });
   await renderPacks();
 });
 const doPackDelete = guard(async function () {
   if (S.packSel === "new") return;
   await api.post("/packs/delete", { id: S.packSel });
   S.packSel = null;
-  pushToast({ tone: "human", text: "已刪除 pack" });
+  pushToast({ tone: "human", text: tr("pack.deleted") });
   await renderPacks();
 });
 const doPackTest = guard(async function () {
   const msg = (D.packTestInput.value || "").trim();
   if (!msg) return;
-  D.packTestOut.replaceChildren(el("span", { class: "loom-meta" }, "比對中…"));
+  D.packTestOut.replaceChildren(el("span", { class: "loom-meta" }, tr("pack.testing")));
   const r = await api.post("/recall", { message: msg });
   const out = [];
   out.push(el("div", { style: { display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap", marginBottom: "8px" } },
     el("span", { class: "loom-tag " + (r.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, r.method),
-    (r.tags || []).length ? el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "命中：") : el("span", { class: "loom-meta", style: { fontSize: "11px" } }, "沒有命中任何 pack"),
+    (r.tags || []).length ? el("span", { class: "loom-meta", style: { fontSize: "11px" } }, tr("pack.matched")) : el("span", { class: "loom-meta", style: { fontSize: "11px" } }, tr("pack.noMatch")),
     ...packTagChips(r.tags || [])));
   (r.records || []).forEach((rec) => out.push(el("div", { class: "loom-quote", style: { marginBottom: "7px" } },
     el("div", { style: { fontWeight: "600", fontSize: "12.5px", marginBottom: "3px" } }, "【" + (rec.title || "") + "】"),
@@ -1212,8 +1226,10 @@ const doPackTest = guard(async function () {
 });
 
 // ───────────────────────── boot ─────────────────────────
+let _statusTimer = null;
 function boot() {
   try { if (localStorage.getItem("loom-theme") === "dark") document.body.classList.add("dark"); } catch {}
+  document.title = "Hermes Loom · " + tr("header.subtitle");
   const root = document.getElementById("root");
   const app = el("div", { class: "loom-app" });
   D.detail = el("div", { style: { flex: "1", overflow: "hidden", background: "var(--bg)", display: "flex", flexDirection: "column", minHeight: "0" } });
@@ -1227,10 +1243,17 @@ function boot() {
     el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody),
     D.toasts);
   root.replaceChildren(app);
-  loadRecords().catch((e) => {
-    D.detail.replaceChildren(el("div", { class: "loom-empty" }, el("div", { style: { color: "var(--del)" } }, "載入失敗：" + e.message)));
-  });
+  loadRecords()
+    .then(() => setView(S.view))   // restore the active view (e.g. after a language switch)
+    .catch((e) => {
+      D.detail.replaceChildren(el("div", { class: "loom-empty" }, el("div", { style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))));
+    });
   refreshStatus();
-  setInterval(refreshStatus, 30000); // keep the pill honest as gateway/plugin state changes
+  // keep the pill honest as gateway/plugin state changes — but only one timer,
+  // since boot() also runs on every language switch.
+  if (!_statusTimer) _statusTimer = setInterval(refreshStatus, 30000);
 }
+// Switching language re-localizes everything by rebuilding the UI in place
+// (backend already returns i18n keys, so no re-fetch of meaning is needed).
+window.LoomI18n.onChange(() => boot());
 boot();

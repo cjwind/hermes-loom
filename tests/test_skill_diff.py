@@ -51,7 +51,8 @@ class TestSkillVersionHistory(LoomTestCase):
                          ["---\nname: demo\n---\nv1", v2, v3])
         self.assertEqual([h["v"] for h in hist], ["v1", "v2", "v3"])
         self.assertEqual([h["kind"] for h in hist], ["auto", "auto", "human"])
-        self.assertEqual(hist[-1]["who"], "你的修改")
+        # `who` is now an i18n key resolved by the UI, not localized text.
+        self.assertEqual(hist[-1]["who"], "who.you")
 
     def test_current_file_appended_when_not_snapshotted(self):
         """An offline change not yet reconciled still shows as the newest version."""
@@ -60,7 +61,7 @@ class TestSkillVersionHistory(LoomTestCase):
         snapshot.bootstrap(led)
         hist = service._skill_version_history(led, "demo", "edited offline")
         self.assertEqual(hist[-1]["value"], "edited offline")
-        self.assertEqual(hist[-1]["who"], "目前檔案")
+        self.assertEqual(hist[-1]["who"], "who.currentFile")
 
     def test_record_detail_exposes_skill_versions(self):
         self.write_skill("memory", "demo", "---\nname: demo\n---\nv1")

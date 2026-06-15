@@ -219,11 +219,18 @@ def apply_skill_delete(ledger: Ledger, name: str, hard: bool = False, reason=Non
 _CAT_DEFAULT = {"memory": "memory", "user": "pref", "skill": "skill"}
 _HINT_CONF = {"plugin_hook": 3, "statedb_ingest": 3, "manual_override": 3,
               "snapshot_diff": 2, "bootstrap": 1}
-_HINT_LABEL = {
-    "plugin_hook": "即時由 plugin 觀測到", "statedb_ingest": "從 session 紀錄精準回填",
-    "snapshot_diff": "由快照比對推測", "bootstrap": "安裝前既有，匯入為歷史",
-    "manual_override": "你的人工調整",
-}
+# Known provenance hints. The UI renders the human-readable label from the
+# "hint.<hint>" i18n key, so the backend only emits the stable hint string.
+_KNOWN_HINTS = set(_HINT_CONF)
+
+
+def _who_key(human: bool, hint: Optional[str] = None) -> str:
+    """i18n key for a version's authorship. Manual edits → 'who.you'; auto
+    deposits carry their provenance hint ('hint.<hint>') when known, else a
+    generic 'who.hermesAuto'."""
+    if human:
+        return "who.you"
+    return ("hint." + hint) if hint in _KNOWN_HINTS else "who.hermesAuto"
 
 
 def _rel_time(ts: Optional[float]) -> str:
@@ -263,7 +270,7 @@ def _raw_from_event(ev: Optional[dict]) -> Optional[dict]:
                          if m.get("role") == "assistant" and m.get("snippet")), None)
     if not user_msg:
         return None
-    who = "你" if user_msg.get("role") == "user" else "Hermes"
+    who = "who.user" if user_msg.get("role") == "user" else "who.hermes"
     return {"who": who, "parts": [user_msg.get("snippet", "")]}
 
 
@@ -272,7 +279,9 @@ def _state(states: dict, target_type: str, key: str) -> dict:
 
 
 def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
-                  states: dict, *, detail: str = "", skill_content: Optional[str] = None,
+                  states: dict, *, detail_key: Optional[str] = None,
+                  detail_params: Optional[dict] = None,
+                  skill_content: Optional[str] = None,
                   fallback_ts: float = 0.0) -> dict:
     st = _state(states, target_type, key)
     overrides_list = ledger.overrides_for_target(target_type, key)
@@ -283,16 +292,16 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
         base = edit_ovr["before_text"]
         origin = _origin_event(ledger, target_type, base) or _origin_event(ledger, target_type, value)
         versions = [
-            {"v": "v1", "kind": "auto", "who": "Hermes 自動沉澱",
-             "when": _rel_time(origin["timestamp"]) if origin else "", "value": base},
-            {"v": "v2", "kind": "human", "who": "你的修改",
-             "when": _rel_time(edit_ovr["applied_at"]), "value": value},
+            {"v": "v1", "kind": "auto", "who": "who.hermesAuto",
+             "whenTs": origin["timestamp"] if origin else None, "value": base},
+            {"v": "v2", "kind": "human", "who": "who.you",
+             "whenTs": edit_ovr["applied_at"], "value": value},
         ]
         active = 1
     else:
         origin = _origin_event(ledger, target_type, value)
-        versions = [{"v": "v1", "kind": "auto", "who": "Hermes 自動沉澱",
-                     "when": _rel_time(origin["timestamp"]) if origin else "", "value": value}]
+        versions = [{"v": "v1", "kind": "auto", "who": "who.hermesAuto",
+                     "whenTs": origin["timestamp"] if origin else None, "value": value}]
         active = 0
 
     # Sortable timestamp = most recent activity: a manual edit if present, else
@@ -314,26 +323,29 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
         "target_type": target_type,
         "target_key": key,
         "cat": cat,
-        "detail": detail or (_HINT_LABEL.get(hint, "Hermes 自動沉澱的紀錄")),
+        # Display strings are i18n keys + params; the UI renders them. Default
+        # detail = the provenance hint's label, else a generic "auto record".
+        "detailKey": detail_key or (("hint." + hint) if hint in _KNOWN_HINTS else "detail.autoRecord"),
+        "detailParams": detail_params or {},
         "conf": _HINT_CONF.get(hint, 2),
         # Prefer the originating event's time; fall back to the record's sortable
-        # ts (e.g. a skill's file mtime) so skills/snapshots still show a time
-        # instead of "—". _rel_time returns "" when there's genuinely no ts.
-        "when": _rel_time(origin["timestamp"]) if origin else _rel_time(ts),
-        "originId": ("session · " + sess[-6:]) if sess else "—",
+        # ts (e.g. a skill's file mtime) so skills/snapshots still show a time.
+        # The UI formats whenTs into a localized relative time.
+        "whenTs": (origin["timestamp"] if origin else ts) or None,
+        "originId": ("session · " + sess[-6:]) if sess else None,
         "origin": (origin or {}).get("tool_name") or "Hermes",
         "session_id": sess,
-        "raw": _raw_from_event(origin) or {"who": "Hermes", "parts": ["（找不到對應的原始對話片段）"]},
+        "raw": _raw_from_event(origin) or {"who": "who.hermes", "parts": [], "placeholderKey": "raw.notFound"},
         # Note: the design dropped the EXTRACT/CLASSIFY pipeline stages, so we no
         # longer emit `extract`/`classify`. The category is carried by `cat`.
         "ts": ts,
         "active": active,
         "versions": versions,
         "pinned": bool(st.get("pinned")),
-        "annotation": ({"text": st["annotation"], "when": _rel_time(st.get("annotation_at"))}
+        "annotation": ({"text": st["annotation"], "whenTs": st.get("annotation_at")}
                        if st.get("annotation") else None),
         "reclassified": ({"from": st.get("reclass_from"), "to": st.get("reclass_to"),
-                          "when": _rel_time(st.get("reclass_at"))}
+                          "whenTs": st.get("reclass_at")}
                          if st.get("reclass_to") else None),
         "origin_event_id": (origin or {}).get("id"),
     }
@@ -354,15 +366,15 @@ def _build_held_record(h: dict, states: dict) -> dict:
     from_label = {"memory": "MEMORY.md", "user": "USER.md"}.get(h.get("from_store"), "?")
     return {
         "id": f"hold:{key}", "target_type": "hold", "target_key": key, "cat": "hold",
-        "detail": f"暫存中 · 原本在 {from_label} · compile 不會輸出到任何檔案",
-        "conf": 2, "when": _rel_time(h.get("held_at")),
-        "originId": "—", "origin": "loom", "session_id": h.get("source_session_id"),
-        "raw": {"who": "你", "parts": ["（暫存項目，尚未決定要放 MEMORY 還是 USER）"]},
+        "detailKey": "detail.held", "detailParams": {"from": from_label},
+        "conf": 2, "whenTs": h.get("held_at"),
+        "originId": None, "origin": "loom", "session_id": h.get("source_session_id"),
+        "raw": {"who": "who.user", "parts": [], "placeholderKey": "raw.held"},
         "ts": h.get("held_at") or 0,
         "active": 0,
-        "versions": [{"v": "v1", "kind": "human", "who": "你暫存的", "when": _rel_time(h.get("held_at")), "value": text}],
+        "versions": [{"v": "v1", "kind": "human", "who": "who.youHeld", "whenTs": h.get("held_at"), "value": text}],
         "pinned": bool(st.get("pinned")),
-        "annotation": ({"text": st["annotation"], "when": _rel_time(st.get("annotation_at"))}
+        "annotation": ({"text": st["annotation"], "whenTs": st.get("annotation_at")}
                        if st.get("annotation") else None),
         "from_store": h.get("from_store"),
         "held": True,
@@ -388,14 +400,14 @@ def _skill_version_history(ledger: Ledger, name: str, current_content: str) -> l
         human = hint == "manual_override"
         history.append({
             "kind": "human" if human else "auto",
-            "who": "你的修改" if human else _HINT_LABEL.get(hint, "Hermes 自動沉澱"),
-            "when": _rel_time(s["captured_at"]),
+            "who": _who_key(human, hint),
+            "whenTs": s["captured_at"],
             "value": s["content"] or "",
         })
 
     cur = current_content or ""
     if not history or history[-1]["value"] != cur:
-        history.append({"kind": "auto", "who": "目前檔案", "when": "", "value": cur})
+        history.append({"kind": "auto", "who": "who.currentFile", "whenTs": None, "value": cur})
 
     for i, h in enumerate(history):
         h["v"] = f"v{i + 1}"
@@ -414,8 +426,9 @@ def _memory_version_history(
     backwards from the current entry rebuilds every state it passed through,
     giving memory the same full-history view skills already get from snapshots.
 
-    Returns ``{v,kind,who,when,value}`` dicts oldest→newest, or ``[]`` when the
-    entry has no recorded edits (the caller then keeps the single-version record).
+    Returns ``{v,kind,who,whenTs,value}`` dicts oldest→newest (who is an i18n key,
+    whenTs an epoch the UI formats), or ``[]`` when the entry has no recorded edits
+    (the caller then keeps the single-version record).
     """
     events = ledger.query_events(target_type=target_type, limit=2000)  # newest first
     by_key: dict = {}
@@ -454,8 +467,8 @@ def _memory_version_history(
         hint = ev["source_hint"]
         human = (ev["action"] or "").startswith("manual") or hint == "manual_override"
         return {"kind": "human" if human else "auto",
-                "who": "你的修改" if human else _HINT_LABEL.get(hint, "Hermes 自動沉澱"),
-                "when": _rel_time(ev["timestamp"]), "value": value}
+                "who": _who_key(human, hint),
+                "whenTs": ev["timestamp"], "value": value}
 
     versions: list[dict] = []
     # The oldest event's before_text is a prior state with no owning event of its
@@ -466,9 +479,8 @@ def _memory_version_history(
         origin = _origin_event(ledger, target_type, first["before_text"])
         versions.append({
             "kind": "auto",
-            "who": (_HINT_LABEL.get(origin["source_hint"], "Hermes 自動沉澱")
-                    if origin else "Hermes 自動沉澱"),
-            "when": _rel_time(origin["timestamp"]) if origin else "",
+            "who": _who_key(False, origin["source_hint"] if origin else None),
+            "whenTs": origin["timestamp"] if origin else None,
             "value": first["before_text"],
         })
     for ev in chain:
@@ -499,6 +511,14 @@ def _tag_skill_origin(rec: dict, skill: dict) -> dict:
     return rec
 
 
+def _skill_detail(category: Optional[str]):
+    """(detailKey, detailParams) for a skill record's subtitle."""
+    category = (category or "").strip()
+    if category:
+        return "detail.skill", {"category": category}
+    return "detail.skillNoCat", {}
+
+
 def build_records(ledger: Ledger) -> dict:
     states = ledger.all_record_states()
     records = []
@@ -514,8 +534,9 @@ def build_records(ledger: Ledger) -> dict:
         skill_summary[s.get("origin_type", "community")] = \
             skill_summary.get(s.get("origin_type", "community"), 0) + 1
         val = s.get("description") or s["name"]
+        dk, dp = _skill_detail(s.get("category"))
         rec = _build_record(ledger, "skill", s["name"], val, states,
-                            detail=f"技能 · {s.get('category') or ''}".strip(" ·"),
+                            detail_key=dk, detail_params=dp,
                             fallback_ts=s.get("mtime", 0.0))
         records.append(_tag_skill_origin(rec, s))
 
@@ -554,8 +575,9 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
         full = hermes_state.read_skill(key)
         if full:
             val = full.get("description") or key
+            dk, dp = _skill_detail(full.get("category"))
             rec = _build_record(ledger, "skill", key, val, states,
-                                detail=f"技能 · {full.get('category') or ''}".strip(" ·"),
+                                detail_key=dk, detail_params=dp,
                                 skill_content=full["content"])
             rec["skill_versions"] = _skill_version_history(ledger, key, full["content"])
             rec = _tag_skill_origin(rec, full)
