@@ -190,3 +190,47 @@ def reconcile_all(ledger: Ledger) -> dict:
         "user": reconcile_memory(ledger, "user"),
         "skills": reconcile_skills(ledger),
     }
+
+
+# ----- live snapshot sync ----------------------------------------------------
+# A hook-observed write (plugin_hook) records an event but, on its own, leaves
+# the stored snapshot stale. The next reconcile would then re-discover that same
+# change as a `snapshot_diff` event whose newer timestamp overrides the precise
+# plugin_hook provenance (`_origin_event` picks the most recent match). Advancing
+# the snapshot right after a live write closes that gap: reconcile sees the hash
+# already matches and emits nothing. Both are idempotent no-ops when up to date.
+
+def capture_memory_snapshot(
+    ledger: Ledger, store_type: str, source_event_id: Optional[int] = None
+) -> Optional[int]:
+    """Advance the memory snapshot to the file's current content. No-op if the
+    latest snapshot already matches (or the file is absent). Returns the new
+    snapshot id, or None."""
+    content = hermes_state.read_memory(store_type)
+    if content is None:
+        return None
+    cur_hash = _sha(content)
+    last = ledger.latest_memory_snapshot(store_type)
+    if last and last["snapshot_hash"] == cur_hash:
+        return None
+    return ledger.add_memory_snapshot(
+        store_type, content, cur_hash, source_event_id=source_event_id
+    )
+
+
+def capture_skill_snapshot(
+    ledger: Ledger, name: str, source_event_id: Optional[int] = None
+) -> Optional[int]:
+    """Advance a skill's snapshot to its current file content. No-op if already
+    current or the skill no longer exists (e.g. a delete — the deletion is left
+    for reconcile, which is guarded against re-emitting)."""
+    full = hermes_state.read_skill(name)
+    if not full:
+        return None
+    cur_hash = _sha(full["content"])
+    last = ledger.latest_skill_snapshot(name)
+    if last and last["content_hash"] == cur_hash:
+        return None
+    return ledger.add_skill_snapshot(
+        name, full["path"], full["content"], cur_hash, source_event_id=source_event_id
+    )

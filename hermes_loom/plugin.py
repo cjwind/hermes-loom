@@ -101,13 +101,19 @@ class LoomPlugin:
         action = a.get("action", "add")
         target = a.get("target", "memory")
         content = a.get("content") or a.get("text")
-        self.observer.on_memory_write(
+        eid = self.observer.on_memory_write(
             action, target, content,
             session_id=session_id or None,
             source_hint="plugin_hook",
             tool_name=_MEMORY_TOOL,
             metadata={"tool_call_id": tool_call_id, "result": res.get("message")},
         )
+        # Advance the snapshot to the file's post-write state so the next
+        # reconcile won't re-discover this change as a snapshot_diff (which would
+        # override the precise plugin_hook provenance after a restart).
+        from . import snapshot
+        store_type = "user" if target == "user" else "memory"
+        snapshot.capture_memory_snapshot(self.ledger, store_type, source_event_id=eid)
 
     def _record_skill(self, args, result, session_id, tool_call_id):
         a = _as_dict(args)
@@ -118,13 +124,18 @@ class LoomPlugin:
         action = _SKILL_ACTION_KIND.get(raw_action, "edit")
         skill_name = a.get("skill_name") or a.get("name") or a.get("skill") or "unknown"
         content = a.get("skill_md") or a.get("content") or a.get("body")
-        self.observer.on_skill_write(
+        eid = self.observer.on_skill_write(
             action, skill_name, content=content,
             session_id=session_id or None,
             source_hint="plugin_hook",
             tool_name=_SKILL_WRITE_TOOL,
             metadata={"tool_call_id": tool_call_id, "result": res.get("message")},
         )
+        # Advance the snapshot so reconcile won't re-discover this edit/create as
+        # a snapshot_diff. A delete leaves no file → capture is a no-op and the
+        # deletion is handled by reconcile (guarded against re-emitting).
+        from . import snapshot
+        snapshot.capture_skill_snapshot(self.ledger, skill_name, source_event_id=eid)
 
     # -- context injection before the model call -----------------------------
     def on_pre_llm_call(self, *, user_message="", session_id="", **_kw):
