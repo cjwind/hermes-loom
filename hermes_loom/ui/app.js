@@ -1244,6 +1244,11 @@ function boot() {
   D.soulBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   D.promptsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
   D.packsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
+  // packsBody/promptsBody are rebuilt above; drop their lazily-built children so
+  // renderPacks/renderPrompts re-create them inside the new bodies. Otherwise the
+  // stale refs point at detached nodes and the page renders blank after a
+  // language switch (boot() reruns) until a full refresh.
+  D.packList = D.packDetail = D.promptList = D.promptDetail = null;
   app.append(
     buildHeader(),
     el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody),
