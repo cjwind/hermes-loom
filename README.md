@@ -5,14 +5,20 @@ A **local-first, sidecar growth-observability & tuning layer** for
 
 Hermes already has persistent memory, skills, a session store and the ability to
 *automatically* deposit new knowledge. Hermes Loom does **not** replace any
-of that. It answers three questions about that growth:
+of that. It observes that growth, lets you tune it, and lets you shape what goes
+into the prompt — across four UI views:
 
-1. **What did Hermes grow?** — what memory entries / skills were recently added,
-   replaced or removed.
-2. **Where did it come from?** — which session and roughly which part of the
-   conversation caused each change.
-3. **How do I tune it?** — edit / delete / annotate an entry or a skill, with the
-   change written back to the *real* Hermes files (safely, with snapshots).
+1. **檢視台 (Inspector)** — *what* did Hermes grow (memory / skills added,
+   replaced, removed), *where* it came from (session + conversation window), and
+   *how to tune it* (edit / delete / recategorize / annotate, written back to the
+   real Hermes files, safely, with snapshots).
+2. **SOUL** — edit `SOUL.md` (the agent identity) in Loom's DB and compile it out
+   to `~/.hermes/SOUL.md` on demand.
+3. **記憶層 (Packs)** — a Loom-only middle memory layer. Each *pack* has a title,
+   tags, free-text content, and a "適用時機" (when-to-use) note. The `pre_llm_call`
+   hook selects relevant packs from your message and injects them as context.
+4. **Prompt** — see the final assembled request of any past conversation: the
+   composed system prompt + the full message stream + what was injected.
 
 Hermes' native auto-deposit behavior is preserved. Loom only observes and, when
 *you* ask, tunes.
@@ -157,6 +163,10 @@ hermes plugins list               # hermes-loom -> enabled
   `(*, tool_name, args, result, session_id, tool_call_id, **_)`, so Hermes hands
   us the **session id directly** → precise, real-time provenance (`plugin_hook`).
   Failed tool calls and read-only `skill_view` are ignored.
+* **`pre_llm_call`** — before every model call, reads the user message, selects
+  relevant **packs** (see *Context injection* below), and returns them as context
+  for the turn (appended to the user message, **not** the system prompt — so it's
+  cache-safe and ephemeral). Each injection is logged to `recall_log`.
 * **`on_session_start`** — runs the bootstrap + snapshot-diff fallback so nothing
   is silently missed.
 * a **`loom_sync`** tool (toolset `loom`) you can call from Hermes to reconcile
@@ -188,6 +198,11 @@ Append-only. Event *facts* are never rewritten; only an event's lifecycle
 | `skill_snapshots` | point-in-time SKILL.md | `skill_name`, `file_path`, `content`, `content_hash` |
 | `source_sessions` | cached session metadata (so the UI needn't scan state.db) | `session_id`, `source`, `title`, `started_at` |
 | `manual_overrides` | human tuning actions | `target_type`, `target_key`, `override_type`, `before_text`, `after_text`, `reason` |
+| `record_state` | per-record UI/tuning state | `pinned`, `cat` (reclassify), `annotation`, `reclass_from/to` |
+| `held_entries` | 暫存 (HOLD) entries — Loom-only, never compiled | `key`, `text`, `from_store` |
+| `packs` | middle-layer memory packs (context injection) | `title`, `tags_json`, `content`, `when_to_use`, `enabled` |
+| `recall_log` | what `pre_llm_call` injected each turn | `session_id`, `message`, `method`, `tags_json`, `records_json` |
+| `soul_versions` | append-only SOUL.md edit history (compiled out on demand) | `content`, `content_hash`, `source` |
 
 `kind` ∈ {`memory_added`, `memory_replaced`, `memory_removed`, `skill_created`,
 `skill_patched`, `skill_edited`, `skill_deleted`, `memory_snapshot_imported`,
@@ -220,12 +235,19 @@ Base: `http://127.0.0.1:8765/api`. No auth (local-first, single user).
 | POST | `/records/add` | `{store_type, text}` → append entry (used for delete-undo) |
 | POST | `/records/annotate` | `{target_type, target_key, text}` → private note (Loom-side only) |
 | POST | `/records/recategorize` | `{target_type, target_key, to_cat}` → **move** the entry between MEMORY.md/USER.md (記憶↔偏好/暫存) |
-| POST | `/records/tags` | `{target_type, target_key, tags: [...]}` → set a record's tags |
-| GET | `/tags` | all tags in use |
-| POST | `/recall` | `{message}` → resolve relevant tags from a message + return matching records as context (used by the pre_llm_call hook) |
-| GET | `/recall-log` | recent context injections (what the hook injected each turn) |
-| GET | `/llm-status[?probe=1]` | whether the tag-resolution LLM is configured/working (no secrets) |
 | POST | `/records/pin` | `{target_type, target_key, pinned}` |
+| GET | `/status` | auto-deposit status (plugin installed/enabled, gateway running, last live hook) |
+| GET | `/packs` | **記憶層**: list packs (title, tags, content, `when_to_use`, enabled) |
+| POST | `/packs/save` | create (no `id`) or update (`id`) a pack |
+| POST | `/packs/delete` | `{id}` → delete a pack |
+| POST | `/recall` | `{message}` → select which packs to inject for a message (used by `pre_llm_call`; also the UI's "test match") |
+| GET | `/recall-log` | recent context injections (what the hook injected each turn) |
+| GET | `/llm-status[?probe=1]` | whether the pack-selection LLM is configured/working (no secrets) |
+| GET | `/soul` | **SOUL**: current DB content + live-file sync status |
+| POST | `/soul/save` | `{content, note?}` → store an edited SOUL.md version in the DB |
+| POST | `/soul/compile` | write the DB SOUL content out to `~/.hermes/SOUL.md` (backs up first) |
+| GET | `/prompts` | **Prompt**: recent conversations that have an assembled system prompt |
+| GET | `/prompts/{session_id}` | the final composed system prompt + outline + full messages + injected packs |
 | POST | `/overrides/memory/edit` | `{store_type, entry_key, new_text, reason?}` |
 | POST | `/overrides/memory/delete` | `{store_type, entry_key, reason?}` |
 | POST | `/overrides/skill/edit` | `{name, new_content, reason?}` |
@@ -271,33 +293,67 @@ snapshot at or before that time (epoch, `YYYY-MM-DD`, or `YYYY-MM-DD HH:MM`).
 Reconstruction is byte-exact for anything Loom has snapshotted. (Event-log replay
 is *not* used — snapshots are the exact, reliable source; see docs/ARCHITECTURE.md.)
 
-## Tags & context recall (pre_llm_call)
+## Context injection — the pack memory layer (pre_llm_call)
 
-Each record can carry multiple **tags** (UI「標籤」or `POST /records/tags`). The
-plugin binds Hermes' **`pre_llm_call`** hook: before every model call it reads the
-user's message, resolves which tags are relevant, and injects the matching tagged
-records into the turn's context (never the system prompt — cache-safe, ephemeral).
-This is recall without being a memory provider.
+The **記憶層** is a Loom-only middle memory layer, independent of Hermes
+memory/skills. Each **pack** has:
 
-Tag resolution (in `tagger.py`):
+- a **title**, **tags**, and free-text **content** (injected verbatim when chosen),
+- an optional **適用時機 (`when_to_use`)** note describing the situations it applies to,
+- an **enabled** flag (disabled packs are never injected).
+
+CRUD them in the UI (or `GET/POST /api/packs[...]`). The plugin binds Hermes'
+**`pre_llm_call`** hook: before every model call it reads the user message,
+selects which packs are relevant, and returns their content as context for the
+turn (appended to the user message, **not** the system prompt — cache-safe,
+ephemeral). This is recall without being a memory provider.
+
+Pack selection (in `tagger.py`):
 - **Semantic (LLM)** when an OpenAI-compatible endpoint is configured via env:
   - `LOOM_LLM_BASE_URL` (e.g. `https://api.openai.com/v1`)
   - `LOOM_LLM_MODEL` (e.g. `gpt-4o-mini`)
   - `LOOM_LLM_API_KEY` (optional), `LOOM_LLM_TIMEOUT` (default 8s)
-  The model is asked to pick relevant tags (verbatim) from the existing tag list.
-- **Keyword fallback** (substring match) when no LLM is configured, or if the call
-  fails/times out. Always offline-safe.
+  The model weighs each pack's **title + tags + when_to_use** and returns the ids
+  of the packs that apply to the message.
+- **Keyword fallback** (a pack matches when its title or any tag is a substring of
+  the message) when no LLM is configured, or if the call fails/times out. Always
+  offline-safe.
 
 Because the hook runs in the gateway process, set the env vars where the gateway
 runs — putting `LOOM_LLM_*` in `~/.hermes/.env` works (Hermes loads it; so does
-Loom). The recall adds one short LLM round-trip per turn when configured; it
-no-ops instantly if no tags exist or none match.
+Loom). It adds one short LLM round-trip per turn when configured; it no-ops
+instantly if there are no enabled packs or none match.
 
 Every injection is recorded to `recall_log` (shared ledger), so the UI's **「注入
 紀錄」** button (and `GET /api/recall-log`) shows what was injected each turn —
-the message, the resolved tags, the method (llm/keyword), and which records. Debug
-the LLM wiring with `GET /api/llm-status?probe=1`. Try recall directly with
-`POST /api/recall {"message": "..."}`.
+the message, the selected packs, and the method (llm/keyword). Debug the LLM
+wiring with `GET /api/llm-status?probe=1`. Test selection live in the 記憶層 view
+or with `POST /api/recall {"message": "..."}`.
+
+## SOUL.md management
+
+The **SOUL** view lets Loom own an editable copy of `SOUL.md` (the agent identity,
+slot #1 of the system prompt). Editing saves an append-only version to the Loom DB
+(`soul_versions`); a separate **compile** step writes the current DB content out to
+`~/.hermes/SOUL.md` (backing up the existing file first). Content is stored and
+written **byte-for-byte** — Hermes reads SOUL.md as plain text with no entry/§
+parsing, so there is no round-trip transform to get wrong. The view shows whether
+the live file is in sync with the DB. (`GET /api/soul`, `POST /api/soul/save`,
+`POST /api/soul/compile`.)
+
+## Prompt viewer — the final assembled request
+
+The **Prompt** view reconstructs what a past conversation actually sent to the
+model, read straight from Hermes' `state.db` (read-only, covers history):
+
+1. **system prompt** — `sessions.system_prompt`, the composed identity + memories
+   + skills + tool framing, with a clickable markdown outline.
+2. **pre_llm_call injected memory** — the packs Loom injected that session (from
+   `recall_log`): the matched message, method, and the injected packs.
+3. **conversation messages** — the full `messages` stream (user / assistant /
+   tool), with tool calls, token counts and reasoning.
+
+(`GET /api/prompts`, `GET /api/prompts/{session_id}`.)
 
 ## Manual tuning safety
 
@@ -364,6 +420,11 @@ Coverage maps to the spec:
 | `test_snapshot.py` | bootstrap import + snapshot-diff fallback produce events |
 | `test_ingest_provenance.py` | precise events from state.db; session window; session-context lookup |
 | `test_overrides.py` | overrides update **both** underlying file and ledger |
+| `test_memory_roundtrip.py` | Loom's memory serialization round-trips through Hermes' `§` delimiter |
+| `test_records.py` / `test_hold.py` | Inspector record building, recategorize, 暫存 (HOLD) |
+| `test_packs_recall.py` | pack CRUD, `when_to_use`, pack selection (LLM + keyword), recall + hook |
+| `test_soul.py` | SOUL.md seed / save / compile (byte-exact round-trip) |
+| `test_prompts.py` | assembled-prompt viewer: listing, outline, messages, injected packs |
 | `test_api.py` | event detail over HTTP; override via API changes the file; 400 on bad input |
 | `test_plugin.py` | plugin registers against partial/empty/failing `ctx` without crashing |
 
