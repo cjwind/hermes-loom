@@ -304,6 +304,24 @@ function ensureSkillContent(r) {
     .catch(() => { r.skill_content = ""; });
 }
 
+// Memory/user records carry only a 2-version (before/after) summary in the list;
+// the full edit chain — needed for the version history + diff picker — is
+// reconstructed server-side and fetched lazily on demand, then cached on the
+// record. A fresh record object after each reload has no flag, so an edit/restore
+// re-fetches the updated chain.
+function ensureVersions(r) {
+  if (r.target_type === "skill" || r._fullVersions) return Promise.resolve();
+  r._fullVersions = true; // mark in-flight/done so renders don't refetch
+  return api.get("/records/" + encodeURIComponent(r.id))
+    .then((d) => {
+      if (d && Array.isArray(d.versions) && d.versions.length) {
+        r.versions = d.versions;
+        if (typeof d.active === "number") r.active = d.active;
+      }
+    })
+    .catch(() => {});
+}
+
 const doSkillEdit = guard(async function (r, newContent, oldContent) {
   if (newContent === oldContent) { S.mode = null; renderDetail(); return; }
   await api.post("/records/edit", { target_type: "skill", target_key: r.target_key, new_value: newContent });
@@ -529,6 +547,10 @@ function renderDetail() {
   // lazily load full SKILL.md so the detail can show + edit the whole content
   if (r.target_type === "skill" && r.skill_content === undefined) {
     ensureSkillContent(r).then(() => { if (selected() === r) renderDetail(); });
+  }
+  // lazily load the full memory/user edit chain (the list only has before/after)
+  if ((r.target_type === "memory" || r.target_type === "user") && !r._fullVersions) {
+    ensureVersions(r).then(() => { if (selected() === r) renderDetail(); });
   }
   const val = activeValue(r);
   host.append(el("div", { style: { padding: "18px 26px 15px", borderBottom: "1px solid var(--border)", background: "var(--surface)" } },
