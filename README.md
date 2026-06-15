@@ -65,6 +65,31 @@ Both directories are mounted into the container by `docker-compose.yml`:
 
 To point at a Hermes install elsewhere, set `HERMES_HOME` in your shell before `docker compose …`.
 
+### AI-assisted tagging (optional)
+
+Loom's recall hook can use an LLM to semantically match a chat message against your
+memory tags. It's optional — without it, tagging falls back to offline keyword
+matching, which always works.
+
+To enable the LLM path, add the variables below to your Hermes env file at
+`~/.hermes/.env`. Loom reads the same file the Hermes gateway loads, and it's already
+mounted into the container via `HERMES_HOME` — no compose changes needed. Any
+OpenAI-compatible `/chat/completions` endpoint works (hosted or a local server).
+
+```sh
+# ~/.hermes/.env
+LOOM_LLM_BASE_URL=https://api.openai.com/v1   # required to enable the LLM path (no trailing /chat/completions)
+LOOM_LLM_MODEL=gpt-4o-mini                    # required
+LOOM_LLM_API_KEY=sk-...                       # optional — omit for keyless local servers (Ollama, LM Studio, …)
+LOOM_LLM_MAX_TOKENS=1024                      # optional (default 1024)
+LOOM_LLM_TIMEOUT=8                            # optional, seconds (default 8)
+```
+
+Both `LOOM_LLM_BASE_URL` and `LOOM_LLM_MODEL` are required to turn the LLM on; the
+call is bounded by `LOOM_LLM_TIMEOUT` and silently falls back to keyword matching on
+any error. Each recall in the conversation log is tagged with the method it used
+(`llm` vs keyword), so you can tell whether the LLM path is active.
+
 ## License
 
 MIT
