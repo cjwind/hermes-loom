@@ -1,8 +1,6 @@
 # 🧵 Hermes Loom
 
-**A local-first growth-observability & tuning sidecar for [Hermes Agent](https://hermes-agent.nousresearch.com).**
-
-Hermes already has persistent memory, skills, a session store, and the ability to *automatically* deposit new knowledge. Hermes Loom does **not** replace any of that — it sits alongside and:
+Hermes Loom is a local-first growth observability and tuning layer for Hermes Agent. See what Hermes learned in memory, skills, and SOUL. Edit, delete, and compile them back into Hermes runtime files.
 
 - **Observes** — what Hermes actually "grew" (memory & skills added / replaced / removed), which conversation it came from, and how it happened;
 - **Records provenance** — every growth event is written to Loom's own append-only SQLite ledger, fully separate from Hermes' native state;
