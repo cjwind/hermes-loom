@@ -480,6 +480,7 @@ function listRow(r) {
     el("span", { style: { flex: "1", minWidth: "0" } },
       el("span", { style: { display: "-webkit-box", WebkitLineClamp: "2", WebkitBoxOrient: "vertical", overflow: "hidden", fontSize: "12.5px", fontWeight: sel ? "600" : "500", color: sel ? "var(--text)" : "var(--text-2)", lineHeight: "1.4" } }, activeValue(r)),
       el("span", { style: { display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" } },
+        provChip(r.provenance),
         el("span", { class: "loom-meta", style: { fontSize: "10.5px" } }, whenText(r)),
         r.pinned && icon("pin", { s: 10, color: "var(--accent)" }),
         isTouched(r) && el("span", { title: tr("tag.humanEdited"), style: { width: "5px", height: "5px", borderRadius: "50%", background: "var(--human)" } }))));
@@ -749,23 +750,62 @@ const skillDiffView = (r) => versionDiffView(r.skill_versions, lineDiffEl);
 const memoryDiffView = (vs) => versionDiffView(vs, (a, b) =>
   el("div", { style: { padding: "2px 0" } }, diffEl(a, b)));
 
+// ── source trace / provenance ──
+// Confidence drives the colour: high = accent, medium = amber, low = grey.
+const PROV_ICON = { exact_match: "check", window_match: "layers", imported: "pack", external: "link", inferred: "spark", missing: "x" };
+function provTone(conf) {
+  return conf === "high" ? { bg: "var(--accent-soft)", fg: "var(--accent-ink)" }
+    : conf === "medium" ? { bg: "var(--human-soft)", fg: "var(--human)" }
+    : { bg: "var(--surface-3)", fg: "var(--text-3)" };
+}
+function provBadge(p) {
+  const t = provTone(p.confidence);
+  return el("span", { class: "loom-tag", style: { height: "20px", background: t.bg, color: t.fg } },
+    icon(PROV_ICON[p.status] || "spark", { s: 11 }), tr("provenance.status." + p.status));
+}
+// compact source-status chip shown on each rail row
+function provChip(p) {
+  if (!p) return null;
+  const t = provTone(p.confidence);
+  return el("span", { class: "loom-tag", style: { height: "16px", padding: "0 5px", fontSize: "9px", background: t.bg, color: t.fg }, title: tr("provenance.status." + p.status) }, tr("provenance.short." + p.status));
+}
+// Evidence, best-effort: exact snippet → session window → fallback explanation.
+function provEvidence(p) {
+  if (p.has_snippet && p.snippet) {
+    return el("div", { class: "loom-quote" },
+      el("span", { class: "who" }, tr(p.snippet_who || "who.user")),
+      el("span", {}, p.snippet));
+  }
+  if (p.has_window && (p.window || []).length) {
+    return el("div", {},
+      el("div", { class: "loom-meta", style: { marginBottom: "6px" } }, tr("provenance.windowNote")),
+      ...p.window.slice(-6).map((m) => el("div", { class: "loom-quote", style: { marginBottom: "6px", borderLeftColor: m.role === "user" ? "var(--accent-line)" : "var(--border-2)" } },
+        el("span", { class: "who" }, (m.role || "") + (m.tool_name ? " · " + m.tool_name : "")),
+        el("span", {}, (m.snippet || "") + (m.truncated ? " …" : "")))));
+  }
+  // no snippet, no window → explain *why* (an honest note, not a bare error)
+  return el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6", padding: "10px 12px", border: "1px dashed var(--border-2)", borderRadius: "8px", background: "var(--surface-2)" } },
+    tr(p.fallback_reason || ("provenance.summary." + p.status)));
+}
+
 function pipeline(r) {
   const vs = r.versions, stored = vs[r.active];
 
-  // ── Section A — 來自這次對話 (provenance) ──
+  // ── Section A — source trace / provenance card ──
+  const p = r.provenance || { status: "missing", confidence: "low" };
   const jumpBtn = r.session_id
     ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, tr("detail.jumpToChat"))
     : null;
-  const rawParts = (r.raw.parts && r.raw.parts.length)
-    ? r.raw.parts.map((p) => typeof p === "string" ? el("span", {}, p) : el("em", {}, p.hl))
-    : [el("span", {}, r.raw.placeholderKey ? tr(r.raw.placeholderKey) : "")];
+  const confChip = el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } },
+    tr("provenance.confidenceLabel"), el("b", { style: { color: provTone(p.confidence).fg } }, tr("provenance.confidence." + p.confidence)));
   const sectionA = el("div", {},
-    sectionHead("link", tr("detail.fromChat"), jumpBtn),
-    el("div", { class: "loom-quote" },
-      el("span", { class: "who" }, tr(r.raw.who) + " · " + r.origin),
-      ...rawParts),
-    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "9px", flexWrap: "wrap" } },
-      el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, r.originId || tr("common.dash")),
+    sectionHead("link", tr("provenance.head"), jumpBtn),
+    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", flexWrap: "wrap" } },
+      provBadge(p), confChip),
+    el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6", marginBottom: "10px" } }, tr(p.summary_key || ("provenance.summary." + p.status))),
+    provEvidence(p),
+    el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", flexWrap: "wrap" } },
+      el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, p.session_title || r.originId || tr("common.dash")),
       el("span", { style: { color: "var(--text-4)" } }, "·"),
       el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "5px" } }, icon("clock", { s: 12 }), whenText(r)),
       el("span", { style: { color: "var(--text-4)" } }, "·"),

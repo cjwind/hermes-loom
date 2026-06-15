@@ -278,11 +278,115 @@ def _state(states: dict, target_type: str, key: str) -> dict:
     return states.get((target_type, key)) or {}
 
 
+# --- source trace / provenance -----------------------------------------------
+# How well can we trace a record back to where it came from? Rather than a
+# binary "found / not found", classify into states the UI can explain and that
+# carry an honest confidence. See README "Source trace".
+#
+#   exact_match  — a precise originating conversation snippet exists
+#   window_match — no precise snippet, but the session window is available
+#   imported     — pre-existed Loom; came in via bootstrap/snapshot import
+#   external     — a non-conversation source (manual edit, Hermes runtime file)
+#   inferred     — system-inferred (snapshot diff), rough origin only
+#   missing      — a source was expected but cannot be located
+_TRACE_CONFIDENCE = {
+    "exact_match": "high", "window_match": "medium", "imported": "medium",
+    "external": "medium", "inferred": "low", "missing": "low",
+}
+# i18n key naming why this isn't an exact match (None for exact_match).
+_TRACE_FALLBACK = {
+    "window_match": "fallback.window", "imported": "fallback.imported",
+    "external": "fallback.external", "inferred": "fallback.inferred",
+    "missing": "fallback.missing",
+}
+# Coarse origin kind, so the UI can keep runtime / import / external distinct.
+_TRACE_OBSERVED = {
+    "exact_match": "runtime", "window_match": "runtime", "imported": "import",
+    "external": "external", "inferred": "inferred", "missing": "none",
+}
+
+
+def _bootstrap_held_value(ledger: Ledger, target_type: str, value: str) -> bool:
+    """True if a bootstrap snapshot-import for this store already contained this
+    value — i.e. the entry pre-dates Loom and arrived via import, not a deposit.
+    (Bootstrap events store the whole file, so we substring-match the entry.)"""
+    if not value:
+        return False
+    evs = ledger.query_events(target_type=target_type, kind="memory_snapshot_imported", limit=3)
+    needle = value.strip()
+    return any(needle and needle in (e.get("after_text") or "") for e in evs)
+
+
+def _source_trace(ledger: Ledger, target_type: str, key: str, value: str,
+                  origin: Optional[dict], *, skill_meta: Optional[dict] = None,
+                  deep: bool = False) -> dict:
+    """Provenance summary for a record. ``origin`` is the value-matched event
+    (precise for memory/user). Skills store SKILL.md *content* in their events,
+    not the description we key on, so we resolve their trace by skill name.
+
+    ``deep`` additionally resolves the session title, snippet text and window
+    (extra DB reads) — used by the detail view, skipped by the list view."""
+    prov = origin
+    if prov is None and target_type == "skill":
+        evs = ledger.events_for_target("skill", key)
+        prov = next((e for e in evs if e.get("source_session_id")), None) or (evs[0] if evs else None)
+
+    hint = prov.get("source_hint") if prov else None
+    raw = _raw_from_event(prov)
+    has_snippet = raw is not None
+    window = (prov or {}).get("source_message_window") or None
+    has_window = bool(window)
+    session_id = (prov or {}).get("source_session_id")
+
+    if prov is None:
+        if target_type == "skill":
+            ot = (skill_meta or {}).get("origin_type")
+            # Official / community skills are Hermes/external files, not deposits.
+            status = "external" if ot in ("hermes_official", "community") else "missing"
+        else:
+            status = "imported" if _bootstrap_held_value(ledger, target_type, value) else "missing"
+    elif hint == "bootstrap":
+        status = "imported"
+    elif hint == "manual_override":
+        status = "external"
+    elif hint == "snapshot_diff":
+        status = "inferred"
+    elif hint in ("plugin_hook", "statedb_ingest"):
+        status = ("exact_match" if has_snippet
+                  else "window_match" if (has_window or session_id) else "inferred")
+    else:
+        status = "inferred"
+
+    traced = status in ("exact_match", "window_match")
+    out = {
+        "status": status,
+        "confidence": _TRACE_CONFIDENCE[status],
+        "session_id": session_id,
+        "hint": hint,
+        "origin_type": (skill_meta or {}).get("origin_type") if target_type == "skill" else None,
+        "has_snippet": has_snippet,
+        "has_window": has_window,
+        "imported": status == "imported",
+        "observed": _TRACE_OBSERVED[status],
+        "last_traced_at": (prov.get("timestamp") if (prov and traced) else None),
+        "fallback_reason": _TRACE_FALLBACK.get(status),
+        "summary_key": "provenance.summary." + status,
+    }
+    if deep:
+        sess = ledger.get_session(session_id) if session_id else None
+        out["session_title"] = (sess or {}).get("title")
+        out["snippet"] = raw["parts"][0] if (raw and raw.get("parts")) else None
+        out["snippet_who"] = raw["who"] if raw else None
+        out["window"] = window
+    return out
+
+
 def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
                   states: dict, *, detail_key: Optional[str] = None,
                   detail_params: Optional[dict] = None,
                   skill_content: Optional[str] = None,
-                  fallback_ts: float = 0.0) -> dict:
+                  skill_meta: Optional[dict] = None,
+                  fallback_ts: float = 0.0, deep: bool = False) -> dict:
     st = _state(states, target_type, key)
     overrides_list = ledger.overrides_for_target(target_type, key)
     edit_ovr = next((o for o in overrides_list
@@ -348,6 +452,10 @@ def _build_record(ledger: Ledger, target_type: str, key: str, value: str,
                           "whenTs": st.get("reclass_at")}
                          if st.get("reclass_to") else None),
         "origin_event_id": (origin or {}).get("id"),
+        # Source-trace status + confidence so the UI can show *how well* this
+        # record is traced, not just whether a snippet was found.
+        "provenance": _source_trace(ledger, target_type, key, value, origin,
+                                    skill_meta=skill_meta, deep=deep),
     }
     if skill_content is not None:
         rec["skill_content"] = skill_content
@@ -378,6 +486,16 @@ def _build_held_record(h: dict, states: dict) -> dict:
                        if st.get("annotation") else None),
         "from_store": h.get("from_store"),
         "held": True,
+        # HOLD entries are a Loom-only staging area you parked by hand — a
+        # deliberate, non-conversation source.
+        "provenance": {
+            "status": "external", "confidence": "medium",
+            "session_id": h.get("source_session_id"), "hint": "manual_override",
+            "origin_type": None, "has_snippet": False, "has_window": False,
+            "imported": False, "observed": "external", "last_traced_at": None,
+            "fallback_reason": "fallback.external", "summary_key": "provenance.summary.external",
+            "session_title": None, "snippet": None, "snippet_who": None, "window": None,
+        },
     }
 
 
@@ -536,7 +654,7 @@ def build_records(ledger: Ledger) -> dict:
         val = s.get("description") or s["name"]
         dk, dp = _skill_detail(s.get("category"))
         rec = _build_record(ledger, "skill", s["name"], val, states,
-                            detail_key=dk, detail_params=dp,
+                            detail_key=dk, detail_params=dp, skill_meta=s,
                             fallback_ts=s.get("mtime", 0.0))
         records.append(_tag_skill_origin(rec, s))
 
@@ -559,7 +677,7 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
         content = hermes_state.read_memory(target_type)
         ent = next((e for e in parse_entries(content or "") if e["key"] == key), None)
         if ent:
-            rec = _build_record(ledger, target_type, key, ent["text"], states)
+            rec = _build_record(ledger, target_type, key, ent["text"], states, deep=True)
             # Detail view shows the entry's *full* edit chain (auto + manual),
             # reconstructed from the prev_key links — not just current-vs-previous.
             # Kept out of build_records (list view) to avoid a full event scan per
@@ -578,7 +696,7 @@ def record_detail(ledger: Ledger, record_id: str) -> Optional[dict]:
             dk, dp = _skill_detail(full.get("category"))
             rec = _build_record(ledger, "skill", key, val, states,
                                 detail_key=dk, detail_params=dp,
-                                skill_content=full["content"])
+                                skill_content=full["content"], skill_meta=full, deep=True)
             rec["skill_versions"] = _skill_version_history(ledger, key, full["content"])
             rec = _tag_skill_origin(rec, full)
     elif target_type == "hold":
