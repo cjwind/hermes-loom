@@ -318,6 +318,9 @@ function ensureVersions(r) {
         r.versions = d.versions;
         if (typeof d.active === "number") r.active = d.active;
       }
+      // the deep provenance carries the resolved snippet/window (the list one
+      // doesn't) — needed for the "from this conversation" source block
+      if (d && d.provenance) r.provenance = d.provenance;
     })
     .catch(() => {});
 }
@@ -850,7 +853,22 @@ function pipeline(r) {
         ...vs.map((v, i) => versionRow(r, v, i)).reverse()));
   }
 
-  return el("div", { style: { display: "flex", flexDirection: "column", gap: "22px" } }, sectionB);
+  // ── Source block — shown only when we can pin the exact originating snippet,
+  // so the user can see which bit of conversation this deposit came from. ──
+  const p = r.provenance || {};
+  let sourceBlock = null;
+  if (p.has_snippet && p.snippet) {
+    const jumpBtn = r.session_id
+      ? el("button", { class: "loom-btn ghost", style: { height: "26px", padding: "0 9px", fontSize: "11.5px", color: "var(--accent-ink)" }, onclick: () => viewSession(r.session_id) }, tr("detail.jumpToChat"))
+      : null;
+    sourceBlock = el("div", {},
+      sectionHead("link", tr("source.head"), jumpBtn),
+      provEvidence(p),
+      (p.session_title || r.originId) && el("div", { style: { marginTop: "8px" } },
+        el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, p.session_title || r.originId)));
+  }
+
+  return el("div", { style: { display: "flex", flexDirection: "column", gap: "22px" } }, sectionB, sourceBlock);
 }
 
 // session source viewer (modal)

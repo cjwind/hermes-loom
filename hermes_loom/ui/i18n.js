@@ -79,6 +79,7 @@
       "raw.notFound": "（找不到對應的原始對話片段）",
       "raw.held": "（暫存項目，尚未決定要放 MEMORY 還是 USER）",
       // source trace / provenance
+      "source.head": "從這段對話來的",
       "provenance.head": "來源溯源",
       "provenance.status.exact_match": "已對應原文",
       "provenance.status.window_match": "對話視窗推測",
@@ -324,6 +325,7 @@
       "detail.held": "Held · originally in {from} · not emitted by compile",
       "raw.notFound": "(no matching source conversation snippet)",
       "raw.held": "(held item; not yet assigned to MEMORY or USER)",
+      "source.head": "From this conversation",
       "provenance.head": "Source & provenance",
       "provenance.status.exact_match": "Source matched",
       "provenance.status.window_match": "Session window",
