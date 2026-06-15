@@ -227,11 +227,6 @@ def h_recall(ledger, params, query, body):
                                log=bool(body.get("log", False)))
 
 
-@route("GET", r"/api/recall-log")
-def h_recall_log(ledger, params, query, body):
-    return 200, service.recall_log(ledger, limit=int(query.get("limit", ["50"])[0]))
-
-
 @route("GET", r"/api/llm-status")
 def h_llm_status(ledger, params, query, body):
     from . import tagger

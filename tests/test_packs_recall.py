@@ -198,7 +198,7 @@ class TestRecallLog(LoomTestCase):
     def test_recall_logs_when_log_true(self):
         led = self._seed()
         service.recall(led, "food allergies?", log=True, session_id="s1")
-        log = service.recall_log(led)["recalls"]
+        log = led.recent_recalls()
         self.assertEqual(len(log), 1)
         self.assertEqual(log[0]["method"], "keyword")
         self.assertEqual(log[0]["count"], 1)
@@ -209,17 +209,17 @@ class TestRecallLog(LoomTestCase):
     def test_recall_does_not_log_by_default(self):
         led = self._seed()
         service.recall(led, "food allergies?")
-        self.assertEqual(service.recall_log(led)["recalls"], [])
+        self.assertEqual(led.recent_recalls(), [])
 
     def test_no_log_when_no_injection(self):
         led = self._seed()
         service.recall(led, "tell me a joke", log=True)
-        self.assertEqual(service.recall_log(led)["recalls"], [])
+        self.assertEqual(led.recent_recalls(), [])
 
     def test_plugin_hook_logs_injection(self):
         self._seed()
         plugin.LoomPlugin().on_pre_llm_call(user_message="what food to avoid?", session_id="sx")
-        self.assertEqual(len(service.recall_log(self.ledger())["recalls"]), 1)
+        self.assertEqual(len(self.ledger().recent_recalls()), 1)
 
 
 class TestPluginPreLlmCall(LoomTestCase):

@@ -26,8 +26,6 @@
       "lang.switchTitle": "切換語言 / Switch language",
       // header / nav
       "header.subtitle": "檢視台",
-      "header.recallBtn": "注入紀錄",
-      "header.recallBtnTitle": "最近 pre_llm_call 注入了哪些記憶",
       "nav.inspector": "檢視台",
       "nav.soul": "SOUL",
       "nav.packs": "記憶層",
@@ -168,11 +166,8 @@
       "toast.recatHold": "已改為暫存，不會 compile 到任何檔案（已從原檔移除）",
       "toast.recatDone": "已改分類為「{cat}」，資料移到 {file}",
       "toast.skillUpdated": "已更新 SKILL.md 內容",
-      // recall log
-      "recall.title": "最近注入的記憶",
+      // recall (injected-memory count, shown in the Prompt viewer)
       "recall.injectedN": "注入 {n} 筆",
-      "recall.empty": "還沒有注入紀錄",
-      "recall.emptyDesc": "當對話經過 gateway 的 pre_llm_call hook、且使用者訊息命中某個標籤時，這裡會列出注入了哪些記憶。",
       // SOUL
       "soul.synced": "已與磁碟同步",
       "soul.dbNewer": "DB 較新 · 尚未編譯",
@@ -262,8 +257,6 @@
       "lang.name": "English",
       "lang.switchTitle": "切換語言 / Switch language",
       "header.subtitle": "Inspector",
-      "header.recallBtn": "Injections",
-      "header.recallBtnTitle": "Which memories were injected on recent pre_llm_call hooks",
       "nav.inspector": "Inspector",
       "nav.soul": "SOUL",
       "nav.packs": "Memory packs",
@@ -383,10 +376,7 @@
       "toast.recatHold": "Changed to Held; won't compile to any file (removed from the source file)",
       "toast.recatDone": "Recategorized to “{cat}”, data moved to {file}",
       "toast.skillUpdated": "Updated SKILL.md content",
-      "recall.title": "Recently injected memories",
       "recall.injectedN": "{n} injected",
-      "recall.empty": "No injection records yet",
-      "recall.emptyDesc": "When a conversation passes the gateway's pre_llm_call hook and the user message matches a tag, the injected memories are listed here.",
       "soul.synced": "In sync with disk",
       "soul.dbNewer": "DB is newer · not yet compiled",
       "soul.noDisk": "No SOUL.md on disk",

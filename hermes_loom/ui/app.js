@@ -338,8 +338,6 @@ function buildHeader() {
   D.themeBtn = themeBtn; paintThemeBtn();
   const langBtn = el("button", { class: "loom-btn", title: tr("lang.switchTitle"),
     onclick: () => window.LoomI18n.toggleLang() }, tr("lang.name"));
-  const recallBtn = el("button", { class: "loom-btn", onclick: viewRecallLog, title: tr("header.recallBtnTitle") },
-    icon("flow", { s: 14 }), tr("header.recallBtn"));
   const pill = el("span", { class: "loom-pill" }, el("span", { class: "loom-dot" }), tr("status.checking"));
   D.pill = pill;
   return el("div", { class: "loom-top" },
@@ -349,7 +347,7 @@ function buildHeader() {
     buildNav(),
     pill,
     el("div", { class: "loom-top-spacer" }),
-    stats, recallBtn, langBtn, themeBtn);
+    stats, langBtn, themeBtn);
 }
 
 // Top-level view switcher: the Inspector (observed growth) vs the SOUL editor.
@@ -391,38 +389,6 @@ function setView(v) {
   if (v === "soul") renderSoul();
   if (v === "packs") renderPacks();
   if (v === "prompts") renderPrompts();
-}
-
-// Modal: recent context injections (from recall_log, written by the gateway hook)
-async function viewRecallLog() {
-  const overlay = el("div", { style: { position: "fixed", inset: "0", background: "rgba(0,0,0,.55)", zIndex: "200", display: "flex", alignItems: "center", justifyContent: "center" }, onclick: (e) => { if (e.target === overlay) overlay.remove(); } });
-  const panel = el("div", { class: "loom-menu", style: { position: "static", width: "680px", maxWidth: "92vw", maxHeight: "82vh", overflow: "auto", padding: "16px 18px" } },
-    el("div", { class: "loom-meta" }, tr("common.loading")));
-  overlay.append(panel); document.body.append(overlay);
-  const head = (extra) => el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px" } },
-    icon("flow", { s: 14 }), el("b", {}, tr("recall.title")),
-    extra, el("div", { style: { flex: "1" } }),
-    el("button", { class: "loom-iconbtn", onclick: () => overlay.remove() }, icon("x", { s: 13 })));
-  try {
-    const d = await api.get("/recall-log?limit=50");
-    const rows = (d.recalls || []).map((rc) =>
-      el("div", { class: "loom-quote", style: { marginBottom: "10px" } },
-        el("div", { style: { display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "6px" } },
-          el("span", { class: "loom-meta", style: { display: "inline-flex", alignItems: "center", gap: "4px" } }, icon("clock", { s: 11 }), fmtTime(rc.timestamp)),
-          el("span", { class: "loom-tag " + (rc.method === "llm" ? "tag-human" : "tag-auto"), style: { height: "18px" } }, rc.method),
-          ...(rc.tags || []).map((t) => el("span", { class: "loom-tag", style: { height: "18px", background: "var(--surface-3)", color: "var(--text-2)" } }, icon("tag", { s: 9 }), t)),
-          el("span", { class: "loom-meta" }, tr("recall.injectedN", { n: rc.count }))),
-        el("div", { class: "who", style: { marginBottom: "4px" } }, "USER · " + (rc.message || "")),
-        ...(rc.records || []).map((r) => el("div", { style: { fontSize: "12.5px", color: "var(--text)", padding: "1px 0" } },
-          el("span", { style: { color: "var(--accent)" } }, "＋ "),
-          r.title && el("b", {}, "【" + r.title + "】"), r.value || ""))));
-    panel.replaceChildren(head(el("span", { class: "loom-meta" }, tr("unit.entries", { n: (d.recalls || []).length }))),
-      ...(rows.length ? rows : [el("div", { class: "loom-empty", style: { padding: "30px" } },
-        el("div", {}, tr("recall.empty")),
-        el("div", { class: "loom-meta", style: { textAlign: "center", maxWidth: "420px" } }, tr("recall.emptyDesc")))]));
-  } catch (e) {
-    panel.replaceChildren(head(null), el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message })));
-  }
 }
 
 // Reflect real auto-deposit status (plugin enabled + gateway running + recent hook).

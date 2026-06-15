@@ -665,10 +665,6 @@ def recall(ledger: Ledger, message: str, limit: int = 8,
             "llm_configured": tagger.llm_configured(), "records": out_records}
 
 
-def recall_log(ledger: Ledger, limit: int = 50) -> dict:
-    return {"recalls": ledger.recent_recalls(limit)}
-
-
 # -- inspector mutations -----------------------------------------------------
 
 def record_edit(ledger: Ledger, target_type: str, key: str, new_value: str, reason=None):
