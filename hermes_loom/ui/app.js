@@ -796,7 +796,9 @@ function pipeline(r) {
     sectionHead("link", tr("provenance.head"), jumpBtn),
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px", flexWrap: "wrap" } },
       provBadge(p)),
-    el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6", marginBottom: "10px" } }, tr(p.summary_key || ("provenance.summary." + p.status))),
+    // For an exact match the quoted snippet *is* the evidence — skip the generic
+    // "we found a matching snippet" summary and let the original text speak.
+    p.status !== "exact_match" && el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6", marginBottom: "10px" } }, tr(p.summary_key || ("provenance.summary." + p.status))),
     provEvidence(p),
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "10px", flexWrap: "wrap" } },
       el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-3)" } }, p.session_title || r.originId || tr("common.dash")),

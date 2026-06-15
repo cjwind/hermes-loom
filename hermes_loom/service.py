@@ -259,18 +259,30 @@ def _origin_event(ledger: Ledger, target_type: str, value: str) -> Optional[dict
 
 
 def _raw_from_event(ev: Optional[dict]) -> Optional[dict]:
-    """Best-effort RAW conversation block from an event's message window."""
+    """Best-effort RAW conversation block from an event's message window.
+
+    Pick the turn that actually *led to* the deposit: the last message at or
+    before the event's own timestamp that carries text. Backfilled windows are
+    centred on the write, so they also contain later, unrelated turns — without
+    the timestamp cutoff we'd quote a follow-up question instead of the trigger.
+    Prefer the user's words; fall back to the assistant's."""
     if not ev:
         return None
     win = ev.get("source_message_window") or []
-    user_msg = next((m for m in reversed(win) if m.get("role") == "user"), None)
-    if not user_msg:
-        user_msg = next((m for m in reversed(win)
-                         if m.get("role") == "assistant" and m.get("snippet")), None)
-    if not user_msg:
+    ts = ev.get("timestamp")
+
+    def usable(m, role):
+        if m.get("role") != role or not m.get("snippet"):
+            return False
+        mt = m.get("timestamp")
+        return ts is None or mt is None or mt <= ts
+
+    msg = (next((m for m in reversed(win) if usable(m, "user")), None)
+           or next((m for m in reversed(win) if usable(m, "assistant")), None))
+    if not msg:
         return None
-    who = "who.user" if user_msg.get("role") == "user" else "who.hermes"
-    return {"who": who, "parts": [user_msg.get("snippet", "")]}
+    who = "who.user" if msg.get("role") == "user" else "who.hermes"
+    return {"who": who, "parts": [msg.get("snippet", "")]}
 
 
 def _state(states: dict, target_type: str, key: str) -> dict:
