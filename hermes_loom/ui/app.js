@@ -370,7 +370,7 @@ const NAV_VIEWS = [
   { k: "inspector", labelKey: "nav.inspector", icon: "flow" },
   { k: "soul", labelKey: "nav.soul", icon: "spark" },
   { k: "packs", labelKey: "nav.packs", icon: "pack" },
-  { k: "prompts", labelKey: "nav.prompts", icon: "layers" },
+  { k: "prompts", labelKey: "nav.conversations", icon: "layers" },
 ];
 function buildNav() {
   const nav = el("div", { style: { display: "flex", gap: "2px", padding: "2px", borderRadius: "8px", background: "var(--surface-2)", marginLeft: "14px" } });
