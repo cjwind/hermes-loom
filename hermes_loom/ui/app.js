@@ -371,6 +371,7 @@ const NAV_VIEWS = [
   { k: "soul", labelKey: "nav.soul", icon: "spark" },
   { k: "packs", labelKey: "nav.packs", icon: "pack" },
   { k: "prompts", labelKey: "nav.conversations", icon: "layers" },
+  { k: "status", labelKey: "nav.status", icon: "check" },
 ];
 function buildNav() {
   const nav = el("div", { style: { display: "flex", gap: "2px", padding: "2px", borderRadius: "8px", background: "var(--surface-2)", marginLeft: "14px" } });
@@ -400,10 +401,12 @@ function setView(v) {
   if (D.soulBody) D.soulBody.style.display = v === "soul" ? "block" : "none";
   if (D.packsBody) D.packsBody.style.display = v === "packs" ? "flex" : "none";
   if (D.promptsBody) D.promptsBody.style.display = v === "prompts" ? "flex" : "none";
+  if (D.statusBody) D.statusBody.style.display = v === "status" ? "block" : "none";
   paintNav();
   if (v === "soul") renderSoul();
   if (v === "packs") renderPacks();
   if (v === "prompts") renderPrompts();
+  if (v === "status") renderDrift();
 }
 
 // Reflect real auto-deposit status (plugin enabled + gateway running + recent hook).
@@ -965,6 +968,166 @@ const doSoulCompile = guard(async function () {
   await renderSoul();
 });
 
+// ───────────────────────── drift / status page ─────────────────────────
+// Read-only. Each target's status is an exact hash compare done server-side;
+// the entry/line summary + unified diff come from difflib. Nothing here writes.
+const DRIFT_META = {
+  in_sync:      { c: "var(--add)",        bg: "var(--add-soft)",    icon: "check" },
+  drifted:      { c: "var(--human)",      bg: "var(--human-soft)",  icon: "flow" },
+  missing_file: { c: "var(--del)",        bg: "var(--del-soft)",    icon: "x" },
+  untracked:    { c: "var(--accent-ink)", bg: "var(--accent-soft)", icon: "plus" },
+  no_baseline:  { c: "var(--text-4)",     bg: "var(--surface-2)",   icon: "dots" },
+};
+const driftPending = (st) => st !== "in_sync" && st !== "no_baseline";
+
+function driftBadge(status) {
+  const m = DRIFT_META[status] || DRIFT_META.no_baseline;
+  return el("span", { style: {
+    display: "inline-flex", alignItems: "center", gap: "5px", height: "22px",
+    padding: "0 9px", borderRadius: "999px", background: m.bg, color: m.c,
+    fontSize: "11.5px", fontWeight: "600",
+    border: "1px solid color-mix(in oklch, " + m.c + " 30%, transparent)",
+  } }, icon(m.icon, { s: 12 }), tr("drift.status." + status));
+}
+
+function driftCardStyle(status) {
+  const m = DRIFT_META[status] || DRIFT_META.no_baseline;
+  return {
+    background: "var(--surface)", border: "1px solid var(--border)",
+    borderLeft: "3px solid " + m.c, borderRadius: "10px", padding: "14px 16px",
+  };
+}
+
+function entrySummaryText(s) {
+  const parts = [];
+  if (s.added) parts.push("+" + s.added);
+  if (s.removed) parts.push("−" + s.removed);
+  if (s.changed) parts.push(tr("drift.changed", { n: s.changed }));
+  return parts.length ? parts.join("  ") + " " + tr("drift.unit.entries") : "";
+}
+function lineSummaryText(s) {
+  const parts = [];
+  if (s.added) parts.push("+" + s.added);
+  if (s.removed) parts.push("−" + s.removed);
+  return parts.length ? parts.join("  ") + " " + tr("drift.unit.lines") : "";
+}
+
+function diffView(lines) {
+  if (!lines || !lines.length) return el("div", { class: "loom-meta" }, tr("drift.noDiff"));
+  return el("div", { class: "loom-mono", style: {
+    fontSize: "12px", lineHeight: "1.55", background: "var(--surface-2)",
+    border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px",
+    overflow: "auto", maxHeight: "360px",
+  } }, ...lines.map((line) => {
+    let color = "var(--text-3)";
+    if (line.startsWith("+++") || line.startsWith("---")) color = "var(--text-4)";
+    else if (line.startsWith("@@")) color = "var(--accent-ink)";
+    else if (line.startsWith("+")) color = "var(--add)";
+    else if (line.startsWith("-")) color = "var(--del)";
+    return el("div", { style: { color, whiteSpace: "pre-wrap", wordBreak: "break-word" } }, line || " ");
+  }));
+}
+
+function driftDiffExpander(targetId) {
+  let loaded = false;
+  const block = el("div", { style: { display: "none", marginTop: "10px" } });
+  const btn = el("button", { class: "loom-btn ghost", style: { height: "24px", padding: "0 9px", fontSize: "11.5px", marginTop: "8px" } });
+  const paint = () => btn.replaceChildren(icon("caret", { s: 12 }), tr(block.style.display === "none" ? "drift.showDiff" : "drift.hideDiff"));
+  btn.addEventListener("click", async () => {
+    if (block.style.display === "none") {
+      if (!loaded) {
+        block.replaceChildren(el("div", { class: "loom-meta" }, tr("common.loading")));
+        try {
+          const d = await api.get("/drift/" + encodeURIComponent(targetId));
+          block.replaceChildren(diffView(d.diff));
+          loaded = true;
+        } catch (e) {
+          block.replaceChildren(el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message })));
+        }
+      }
+      block.style.display = "block";
+    } else {
+      block.style.display = "none";
+    }
+    paint();
+  });
+  paint();
+  return el("div", {}, btn, block);
+}
+
+function driftFileCard(t) {
+  const kids = [el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
+    driftBadge(t.status),
+    el("div", { style: { fontWeight: "600", fontSize: "14px" } }, t.name),
+    el("span", { class: "loom-mono", style: { fontSize: "11px", color: "var(--text-4)" } }, t.path || ""),
+    el("div", { style: { flex: "1" } }),
+    t.last_captured ? el("span", { class: "loom-meta" }, tr("drift.lastCaptured", { rel: relTime(t.last_captured) })) : null)];
+  if (t.summary && (t.summary.added || t.summary.removed || t.summary.changed))
+    kids.push(el("div", { style: { marginTop: "7px", fontSize: "12.5px", color: "var(--text-2)" } }, entrySummaryText(t.summary)));
+  if (t.status === "missing_file")
+    kids.push(el("div", { style: { marginTop: "7px", fontSize: "12px", color: "var(--del)" } }, tr("drift.missingNote")));
+  if (driftPending(t.status)) kids.push(driftDiffExpander(t.id));
+  return el("div", { style: driftCardStyle(t.status) }, ...kids);
+}
+
+function driftSkillsCard(sk) {
+  const c = sk.counts;
+  const header = el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" } },
+    driftBadge(sk.status),
+    el("div", { style: { fontWeight: "600", fontSize: "14px" } }, tr("drift.skills")),
+    el("div", { style: { flex: "1" } }),
+    el("span", { class: "loom-meta" }, tr("drift.skillCounts", { total: c.total, ok: c.in_sync })));
+  const drifting = sk.items.filter((i) => driftPending(i.status));
+  const rows = [header];
+  if (!drifting.length) {
+    rows.push(el("div", { style: { marginTop: "8px", fontSize: "12.5px", color: "var(--text-3)" } }, tr("drift.allSkillsSynced")));
+  } else {
+    drifting.forEach((it) => rows.push(el("div", { style: { marginTop: "10px", paddingTop: "10px", borderTop: "1px solid var(--border)" } },
+      el("div", { style: { display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" } },
+        driftBadge(it.status),
+        el("div", { class: "loom-mono", style: { fontSize: "12.5px", fontWeight: "600" } }, it.name),
+        it.summary && (it.summary.added || it.summary.removed)
+          ? el("span", { style: { fontSize: "12px", color: "var(--text-2)" } }, lineSummaryText(it.summary)) : null),
+      driftDiffExpander(it.id))));
+  }
+  return el("div", { style: driftCardStyle(sk.status) }, ...rows);
+}
+
+function driftBanner(data) {
+  const ok = data.overall === "in_sync";
+  const col = ok ? "var(--add)" : "var(--human)";
+  return el("div", { style: {
+    display: "flex", alignItems: "center", gap: "10px", padding: "13px 16px",
+    borderRadius: "10px", background: ok ? "var(--add-soft)" : "var(--human-soft)",
+    color: col, border: "1px solid color-mix(in oklch, " + col + " 30%, transparent)",
+    fontWeight: "600", fontSize: "14px",
+  } }, icon(ok ? "check" : "flow", { s: 16 }),
+    ok ? tr("drift.allSynced") : tr("drift.nDrifted", { n: data.drift_count }));
+}
+
+async function renderDrift() {
+  const host = D.statusBody;
+  host.replaceChildren(el("div", { class: "loom-meta", style: { padding: "30px" } }, tr("common.loading")));
+  let data;
+  try { data = await api.get("/drift"); }
+  catch (e) { host.replaceChildren(el("div", { class: "banner err", style: { margin: "24px", color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))); return; }
+
+  host.replaceChildren(el("div", { style: { maxWidth: "880px", margin: "0 auto", padding: "26px 28px 40px", display: "flex", flexDirection: "column", gap: "14px" } },
+    el("div", {},
+      el("div", { style: { display: "flex", alignItems: "center", gap: "9px", flexWrap: "wrap" } },
+        icon("check", { s: 18, color: "var(--accent)" }),
+        el("div", { style: { fontSize: "19px", fontWeight: "700", letterSpacing: "-.3px" } }, tr("drift.title")),
+        el("div", { style: { flex: "1" } }),
+        el("button", { class: "loom-btn ghost", onclick: () => renderDrift() }, icon("undo", { s: 13 }), tr("drift.recheck"))),
+      el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", marginTop: "5px", lineHeight: "1.6" } }, tr("drift.desc"))),
+    driftBanner(data),
+    driftFileCard(data.user),
+    driftFileCard(data.memory),
+    driftSkillsCard(data.skills),
+    data.overall === "in_sync" ? null
+      : el("div", { style: { fontSize: "12px", color: "var(--text-3)", lineHeight: "1.6", marginTop: "2px" } }, tr("drift.reconcileHint"))));
+}
+
 // ───────────────────────── assembled prompt viewer ─────────────────────────
 async function renderPrompts() {
   if (!D.promptList) {
@@ -1286,6 +1449,7 @@ function boot() {
   D.soulBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   D.promptsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
   D.packsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
+  D.statusBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   // packsBody/promptsBody are rebuilt above; drop their lazily-built children so
   // renderPacks/renderPrompts re-create them inside the new bodies. Otherwise the
   // stale refs point at detached nodes and the page renders blank after a
@@ -1293,7 +1457,7 @@ function boot() {
   D.packList = D.packDetail = D.promptList = D.promptDetail = null;
   app.append(
     buildHeader(),
-    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody),
+    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody, D.statusBody),
     D.toasts);
   root.replaceChildren(app);
   loadRecords()

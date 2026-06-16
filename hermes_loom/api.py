@@ -26,6 +26,8 @@ Endpoints (see README for full list):
   POST /api/overrides/skill/delete
   POST /api/maintenance/reconcile     (run snapshot-diff fallback now)
   POST /api/maintenance/ingest        (backfill from state.db)
+  GET  /api/drift                     (per-target drift: live files vs Loom snapshots)
+  GET  /api/drift/{target}            (one target's entry/line summary + unified diff)
 """
 
 from __future__ import annotations
@@ -365,6 +367,22 @@ def h_reconcile(ledger, params, query, body):
 @route("POST", r"/api/maintenance/ingest")
 def h_ingest(ledger, params, query, body):
     return 200, {"ok": True, "result": ingest.ingest_state_db(ledger)}
+
+
+@route("GET", r"/api/drift")
+def h_drift(ledger, params, query, body):
+    from . import drift
+    return 200, drift.summary(ledger)
+
+
+@route("GET", r"/api/drift/(?P<target>.+)")
+def h_drift_detail(ledger, params, query, body):
+    from urllib.parse import unquote
+    from . import drift
+    d = drift.detail(ledger, unquote(params["target"]))
+    if d is None:
+        return 404, {"error": "unknown drift target"}
+    return 200, d
 
 
 @route("GET", r"/api/health")

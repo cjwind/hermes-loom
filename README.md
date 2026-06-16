@@ -15,6 +15,7 @@ Loom is built for people who want long-running agents to be understandable and c
 - Organize task-specific middle-layer context packs
 - Dynamically inject relevant packs for specific tasks
 - Inspect prompt composition and context assembly
+- Detect drift between Hermes' live files and Loom's snapshots on a read-only **Status** page
 
 ## Quick Start
 

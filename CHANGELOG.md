@@ -5,6 +5,21 @@ All notable changes to Hermes Loom are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Status (drift) page.** A new read-only "狀態 / Status" nav tab reports, per
+  target (`USER.md`, `MEMORY.md`, and each managed skill), whether the live file
+  on disk still matches Loom's latest snapshot. Verdicts are exact: an `sha256`
+  compare for `in_sync` / `drifted` / `missing_file` / `untracked` /
+  `no_baseline`, an entry-level summary derived from `difflib.SequenceMatcher`
+  over the `§`-separated entries (added / removed / changed — no key-set
+  heuristic), and an expandable `difflib` unified diff. Nothing here writes:
+  drift is computed live and clears once `reconcile` / `sync` advances the
+  snapshots. New endpoints `GET /api/drift` and `GET /api/drift/<target>`;
+  `hermes_loom/drift.py`; `tests/test_drift.py`.
+
 ## [0.1.0] - 2026-06-16
 
 First public release. Hermes Loom is a local-first growth observability and tuning
