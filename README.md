@@ -54,8 +54,7 @@ scripts/uninstall-plugin.sh
 ```
 
 Your Loom ledger in `~/.hermes-loom` is left untouched — delete that directory too if
-you want a clean slate. Both scripts take an optional `<ssh-host>` to act on a remote
-Hermes install.
+you want a clean slate.
 
 ### Common commands
 
