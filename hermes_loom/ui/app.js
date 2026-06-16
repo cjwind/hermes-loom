@@ -619,14 +619,16 @@ function editor(r, val) {
   const base = (isSkill && r.skill_content != null) ? r.skill_content : val;
   const ta = el("textarea", {
     class: "loom-edit" + (isSkill ? " sm" : ""), rows: isSkill ? 16 : 2,
-    oninput: () => { S.draft = ta.value; refreshDiff(); },
+    oninput: () => { S.draft = ta.value; if (!isSkill) refreshDiff(); },
     onkeydown: (e) => {
       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) commitEdit(r, base);
       if (e.key === "Escape") { S.mode = null; renderDetail(); }
     },
   });
   ta.value = S.draft; D.editTa = ta;
-  const diffBox = el("div", { style: { marginTop: "5px", padding: "8px 11px", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-2)", fontSize: "13px", minHeight: "20px", maxHeight: "180px", overflow: "auto" } });
+  // live char-diff preview for short memory/user entries; skills edit the full
+  // SKILL.md so they skip it (no inline diff under the editor).
+  const diffBox = isSkill ? null : el("div", { style: { marginTop: "5px", padding: "8px 11px", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface-2)", fontSize: "13px", minHeight: "20px", maxHeight: "180px", overflow: "auto" } });
   D.diffBox = diffBox; D.diffBase = base;
   const saveLabel = isSkill ? tr("editor.saveSkill") : tr("editor.saveNewVersion");
   const hint = isSkill
@@ -634,7 +636,7 @@ function editor(r, val) {
     : tr("editor.hintMem", { n: r.versions.length + 1 });
   const wrap = el("div", {},
     ta,
-    el("div", { style: { marginTop: "9px", fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "7px" } },
+    !isSkill && el("div", { style: { marginTop: "9px", fontSize: "11px", color: "var(--text-3)", display: "flex", alignItems: "center", gap: "7px" } },
       icon("pencil", { s: 11, color: "var(--human)" }), tr("editor.livePreview")),
     diffBox,
     el("div", { style: { display: "flex", alignItems: "center", gap: "8px", marginTop: "11px" } },
@@ -642,7 +644,7 @@ function editor(r, val) {
       el("button", { class: "loom-btn ghost", onclick: () => { S.mode = null; renderDetail(); } }, tr("common.cancel")),
       el("div", { style: { flex: "1" } }),
       el("span", { class: "loom-meta", html: hint })));
-  setTimeout(refreshDiff, 0);
+  if (!isSkill) setTimeout(refreshDiff, 0);
   return wrap;
 }
 function refreshDiff() {
