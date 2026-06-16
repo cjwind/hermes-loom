@@ -5,6 +5,31 @@ All notable changes to Hermes Loom are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Compile / Drift Status panel** — a control-plane view of every runtime target
+  (`SOUL.md`, `USER.md`, `MEMORY.md`, managed skills). Each target reports a
+  `compile_status` (never_compiled / compiled / compile_failed) and a `drift_status`
+  (in_sync / drifted / unknown), the last-compiled and current-runtime fingerprints,
+  and best-effort managed / unmanaged / divergent item counts so you can see at a
+  glance whether Loom is in control and where Hermes has written on its own.
+  - Drift detection is fingerprint-based (last successful compile vs the file's
+    current content) and does not assume Loom is the only writer — external edits
+    show up as drift.
+  - New `compile_events` ledger table records each compile out (target, status,
+    fingerprint, path); `compiler.compile_in_place` and `soul.compile_to_hermes`
+    write these.
+  - APIs: `GET /api/runtime-status`, `GET /api/runtime-status/{target}`,
+    `POST /api/compile` (per-target results, fingerprints, errors).
+
+### Notes
+
+- Managed/unmanaged/divergent counts are best-effort and entry-level for
+  memory/user (an externally edited entry reads as one divergent + one unmanaged);
+  they are not a guaranteed block-level diff.
+
 ## [0.1.0] - 2026-06-16
 
 First public release. Hermes Loom is a local-first growth observability and tuning

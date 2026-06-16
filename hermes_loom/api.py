@@ -24,6 +24,9 @@ Endpoints (see README for full list):
   POST /api/overrides/memory/delete
   POST /api/overrides/skill/edit
   POST /api/overrides/skill/delete
+  GET  /api/runtime-status            (compile + drift status for every target)
+  GET  /api/runtime-status/{target}   (one target's detail: drift, diff, events)
+  POST /api/compile                   (compile all targets out; per-target result)
   POST /api/maintenance/reconcile     (run snapshot-diff fallback now)
   POST /api/maintenance/ingest        (backfill from state.db)
 """
@@ -355,6 +358,32 @@ def h_skill_delete(ledger, params, query, body):
         return 200, {"ok": True, **res}
     except (KeyError, OverrideError) as e:
         return 400, {"ok": False, "error": str(e)}
+
+
+# ---- Compile / Drift status (Loom as Hermes control plane) --------------
+
+@route("GET", r"/api/runtime-status")
+def h_runtime_status(ledger, params, query, body):
+    from . import runtime
+    return 200, runtime.runtime_status(ledger)
+
+
+@route("GET", r"/api/runtime-status/(?P<target>[^/]+)")
+def h_runtime_target(ledger, params, query, body):
+    from urllib.parse import unquote
+    from . import runtime
+    detail = runtime.target_detail(ledger, unquote(params["target"]))
+    if not detail:
+        return 404, {"error": "unknown target"}
+    return 200, detail
+
+
+@route("POST", r"/api/compile")
+def h_compile(ledger, params, query, body):
+    from . import runtime
+    include_soul = bool(body.get("include_soul", True)) if body else True
+    res = runtime.compile_all(ledger, include_soul=include_soul)
+    return 200, res
 
 
 @route("POST", r"/api/maintenance/reconcile")

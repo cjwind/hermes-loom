@@ -19,12 +19,17 @@ Reliability note: snapshots are only as fresh as Loom's last observation/sync. R
 
 from __future__ import annotations
 
+import hashlib
 import time
 from pathlib import Path
 from typing import Optional
 
 from . import config
 from .ledger import Ledger
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def parse_as_of(s: Optional[str]) -> Optional[float]:
@@ -152,26 +157,47 @@ def compile_to_dir(ledger: Ledger, out_dir: Path, as_of: Optional[float] = None)
 
 
 def compile_in_place(ledger: Ledger, as_of: Optional[float] = None) -> dict:
-    """Overwrite the real Hermes files, backing up each first."""
+    """Overwrite the real Hermes files, backing up each first.
+
+    Each target is written independently and records an append-only
+    ``compile_event`` (status + fingerprint) so the drift panel knows what was
+    last compiled. A write failure on one target is captured as ``compile_failed``
+    and does not abort the others.
+    """
     data = collect(ledger, as_of)
-    written, backups = [], []
+    written, backups, results, errors = [], [], [], []
+
+    def _do(target: str, dest: Path, content: str) -> None:
+        try:
+            b = _backup(dest)
+            if b:
+                backups.append(b)
+            _write(dest, content)
+            fp = _sha(content)
+            ledger.add_compile_event(target=target, status="compiled",
+                                     fingerprint=fp, written_path=str(dest), mode="in_place")
+            written.append(str(dest))
+            results.append({"target": target, "status": "compiled",
+                            "fingerprint": fp, "path": str(dest)})
+        except OSError as e:
+            ledger.add_compile_event(target=target, status="compile_failed",
+                                     written_path=str(dest), mode="in_place", error=str(e))
+            results.append({"target": target, "status": "compile_failed",
+                            "error": str(e), "path": str(dest)})
+            errors.append({"target": target, "error": str(e)})
+
     for store_type, store in data["memory"].items():
+        target = "user" if store_type == "user" else "memory"
         dest = config.memory_md_path() if store_type == "memory" else config.user_md_path()
-        b = _backup(dest)
-        if b:
-            backups.append(b)
-        _write(dest, store["content"])
-        written.append(str(dest))
+        _do(target, dest, store["content"])
     for sk in data["skills"]:
         # use the recorded absolute path when valid for this machine, else the
         # path under the live skills dir reconstructed from rel_path
         dest = Path(sk["file_path"]) if sk.get("file_path") else (config.skills_dir() / sk["rel_path"])
         if not str(dest).startswith(str(config.skills_dir())):
             dest = config.skills_dir() / sk["rel_path"]
-        b = _backup(dest)
-        if b:
-            backups.append(b)
-        _write(dest, sk["content"])
-        written.append(str(dest))
+        _do("skill:" + sk["name"], dest, sk["content"])
+
     return {"mode": "in_place", "written": written, "files": len(written),
-            "backups": backups, "missing": data["missing"], "as_of": as_of}
+            "backups": backups, "missing": data["missing"], "as_of": as_of,
+            "results": results, "errors": errors}

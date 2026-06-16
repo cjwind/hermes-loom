@@ -121,11 +121,16 @@ def compile_to_hermes(ledger: Ledger) -> dict:
         raise ValueError("no SOUL content in Loom yet — save one first")
     path = config.soul_md_path()
     backup = _backup_disk()
+    fp = _sha(latest["content"])
     _atomic_write(path, latest["content"])
+    # record the compile so the drift panel has a baseline fingerprint for SOUL
+    ledger.add_compile_event(target="soul", status="compiled",
+                             fingerprint=fp, written_path=str(path), mode="in_place")
     return {
         "compiled": True,
         "path": str(path),
         "backup": backup,
         "bytes": len(latest["content"].encode("utf-8")),
+        "fingerprint": fp,
         "version_id": latest["id"],
     }
