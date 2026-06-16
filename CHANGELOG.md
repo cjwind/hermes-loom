@@ -15,9 +15,9 @@ files.
 
 ### Added
 
-- **Deposits inspector (沈澱).** Browse, search, and inspect everything Hermes has
+- **Deposits inspector.** Browse, search, and inspect everything Hermes has
   grown — memory, user preferences, and skills — as "deposits", classified into
-  記憶 / 技能 / 偏好. Pin, annotate, edit, delete, and recategorize entries (which
+  memory / skill / preference. Pin, annotate, edit, delete, and recategorize entries (which
   moves them between `MEMORY.md` and `USER.md`).
   - Full per-entry **edit history** reconstructed from the append-only ledger, with
     expandable version rows and **restore-to-any-version** (history survives
@@ -27,15 +27,14 @@ files.
     viewer.
 - **SOUL.md management.** A Loom-owned, editable copy of the agent identity file with
   DB-stored version history, compiled out to `~/.hermes/SOUL.md` on demand.
-- **Memory packs (記憶層).** A Loom-only middle memory layer: free-text notes with a
-  title, tags (chip editor), and a "適用時機 / when-to-use" field. The
+- **Memory packs.** A Loom-only middle memory layer: free-text notes with a
+  title, tags, and a "when-to-use" field. The
   `pre_llm_call` recall hook resolves the user message against pack tags/titles and
   injects matching packs as context — semantically via an OpenAI-compatible LLM when
   configured, otherwise via offline keyword matching.
-- **Conversation log (對話記錄).** An assembled-prompt viewer showing a session's full
+- **Conversation log.** An assembled-prompt viewer showing a session's full
   composed request — system prompt (SOUL + memory + skills + tool framing), the
-  `pre_llm_call` injected memory, and the conversation messages — plus per-turn
-  injection records tagged with the method used (`llm` vs keyword).
+  `pre_llm_call` injected memory, and the conversation messages.
 - **Compile.** Regenerate `MEMORY.md` / `USER.md` / every `SKILL.md` / `SOUL.md` from
   the Loom ledger, in place (with timestamped backups) or into a fresh directory.
   Supports historical `--as-of` compiles, and auto-syncs from the live files first so
@@ -44,12 +43,7 @@ files.
   `on_session_start`, and `pre_llm_call`; it observes growth live and degrades safely
   when the gateway is unavailable. Growth is also captured offline by ingesting
   Hermes' `state.db` history and by a snapshot-diff reconcile fallback.
-- **Provenance ledger.** An append-only SQLite ledger records growth events, full
-  before/after content snapshots (`memory_snapshots` / `skill_snapshots`), manual
-  overrides, SOUL versions, packs, recall logs, and HOLD entries — each event tagged
-  with a source hint (`plugin_hook` / `statedb_ingest` / `snapshot_diff` / `bootstrap`
-  / `manual_override`).
-- **HOLD (暫存).** Park entries in Loom only; they are excluded from compile output.
+- **HOLD.** Park entries in Loom only; they are excluded from compile output.
 - **CLI.** `python -m hermes_loom <bootstrap|ingest|reconcile|sync|compile|serve|status>`.
 - **Packaging.** pip-installable with the UI bundled and a Hermes plugin entry point;
   Docker / Docker Compose packaging for a containerized install.

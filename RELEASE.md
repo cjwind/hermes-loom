@@ -10,7 +10,7 @@ Hermes runtime files.
 
 ## Highlights
 
-- **Deposits inspector (沈澱)** — browse, search, classify (記憶 / 技能 / 偏好), pin,
+- **Deposits inspector** — browse, search, classify (memory / skill / preference), pin,
   annotate, edit, and delete what Hermes has grown. Recategorizing moves an entry
   between `MEMORY.md` and `USER.md`.
 - **Full version history with restore** — every memory/user entry keeps its complete
@@ -20,10 +20,10 @@ Hermes runtime files.
   the detail shows that exact snippet with a jump-to-conversation viewer.
 - **SOUL.md, owned by Loom** — edit the agent identity file with version history and
   compile it out on demand.
-- **Memory packs (記憶層)** — a Loom-only context layer with tags and a "when-to-use"
+- **Memory packs** — a Loom-only context layer with tags and a "when-to-use"
   field; the recall hook injects matching packs into the prompt, semantically via an
   LLM (optional) or via keyword matching.
-- **Conversation log (對話記錄)** — inspect a session's fully assembled system prompt
+- **Conversation log** — inspect a session's fully assembled system prompt
   and exactly what memory was injected each turn.
 - **Compile** — regenerate `MEMORY.md` / `USER.md` / `SKILL.md` / `SOUL.md` from the
   ledger, in place (with backups) or into a directory; supports historical `--as-of`.
@@ -46,7 +46,7 @@ docker compose run --rm loom sync   # import current memory/skills + backfill hi
 docker compose up -d                # UI at http://127.0.0.1:8765
 ```
 
-See the [README](README.md) for pip install, configuration, and the optional
+See the [README](README.md) for configuration, and the optional
 AI-assisted tagging setup (`LOOM_LLM_*` in `~/.hermes/.env`).
 
 ## Notes & limitations
