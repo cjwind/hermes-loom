@@ -167,23 +167,6 @@ CREATE TABLE IF NOT EXISTS soul_versions (
 );
 CREATE INDEX IF NOT EXISTS idx_soul_created ON soul_versions(created_at DESC);
 
--- Compile events: an append-only log of every compile Loom writes OUT to a
--- Hermes runtime file. This is the metadata the Compile/Drift status panel reads
--- to know when each target was last compiled and with what fingerprint, so it can
--- compare against the file's current content and detect external drift. Targets:
--- 'soul' | 'user' | 'memory' | 'skill:<name>'.
-CREATE TABLE IF NOT EXISTS compile_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp REAL NOT NULL,
-    target TEXT NOT NULL,
-    status TEXT NOT NULL,                    -- compiled | compile_failed
-    fingerprint TEXT,                        -- sha256 of the content written (NULL on failure)
-    written_path TEXT,
-    mode TEXT,                               -- in_place | dir
-    error TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_compile_target ON compile_events(target, timestamp DESC);
-
 -- Per-record UI/tuning state for the Inspector: pin, reclassify, annotation.
 -- Keyed by (target_type, target_key). Best-effort: memory keys are content
 -- hashes, so pins/notes are re-anchored on the new key after an edit.
@@ -435,65 +418,6 @@ class Ledger:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
-
-    # -- compile events ------------------------------------------------------
-    def add_compile_event(
-        self, *, target: str, status: str, fingerprint: Optional[str] = None,
-        written_path: Optional[str] = None, mode: str = "in_place",
-        error: Optional[str] = None, timestamp: Optional[float] = None,
-    ) -> int:
-        ts = _now() if timestamp is None else float(timestamp)
-        with self._lock:
-            cur = self.conn.execute(
-                "INSERT INTO compile_events(timestamp,target,status,fingerprint,written_path,mode,error)"
-                " VALUES (?,?,?,?,?,?,?)",
-                (ts, target, status, fingerprint, written_path, mode, error),
-            )
-            self.conn.commit()
-            return int(cur.lastrowid)
-
-    def latest_compile_event(self, target: str) -> Optional[dict]:
-        row = self.conn.execute(
-            "SELECT * FROM compile_events WHERE target=? ORDER BY timestamp DESC, id DESC LIMIT 1",
-            (target,),
-        ).fetchone()
-        return dict(row) if row else None
-
-    def latest_successful_compile(self, target: str) -> Optional[dict]:
-        """Most recent compile that actually wrote a file — the drift baseline."""
-        row = self.conn.execute(
-            "SELECT * FROM compile_events WHERE target=? AND status='compiled' "
-            "ORDER BY timestamp DESC, id DESC LIMIT 1",
-            (target,),
-        ).fetchone()
-        return dict(row) if row else None
-
-    def recent_compile_events(
-        self, target: Optional[str] = None, like: Optional[str] = None, limit: int = 20
-    ) -> list[dict]:
-        if target:
-            rows = self.conn.execute(
-                "SELECT * FROM compile_events WHERE target=? ORDER BY timestamp DESC, id DESC LIMIT ?",
-                (target, limit),
-            ).fetchall()
-        elif like:
-            rows = self.conn.execute(
-                "SELECT * FROM compile_events WHERE target LIKE ? ORDER BY timestamp DESC, id DESC LIMIT ?",
-                (like, limit),
-            ).fetchall()
-        else:
-            rows = self.conn.execute(
-                "SELECT * FROM compile_events ORDER BY timestamp DESC, id DESC LIMIT ?",
-                (limit,),
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def compiled_skill_targets(self) -> list[str]:
-        """Distinct 'skill:<name>' targets that have ever been compiled."""
-        rows = self.conn.execute(
-            "SELECT DISTINCT target FROM compile_events WHERE target LIKE 'skill:%'"
-        ).fetchall()
-        return [r["target"] for r in rows]
 
     # -- source sessions cache ----------------------------------------------
     def upsert_session(

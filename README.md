@@ -12,8 +12,6 @@ Loom is built for people who want long-running agents to be understandable and c
 - Edit or delete bad, stale, or overly specific agent learnings
 - Manage SOUL.md as a first-class layer
 - Compile Loom-managed records back into Hermes runtime files
-- Track compile & drift status per runtime target — see when each file was last
-  compiled, whether it still matches Loom, and what Hermes wrote on its own
 - Organize task-specific middle-layer context packs
 - Dynamically inject relevant packs for specific tasks
 - Inspect prompt composition and context assembly

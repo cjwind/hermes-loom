@@ -44,7 +44,6 @@ const ICONS = {
   dots: '<circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/>',
   globe: '<g><circle cx="8" cy="8" r="6"/><ellipse cx="8" cy="8" rx="2.6" ry="6"/><path d="M2 8h12"/></g>',
   caret: '<path d="M6 4l4 4-4 4"/>',
-  gauge: '<g><path d="M2.6 12a5.4 5.4 0 0110.8 0"/><path d="M8 12l3.2-2.6"/><circle cx="8" cy="12" r="1" fill="currentColor" stroke="none"/></g>',
 };
 function icon(name, { s = 13, color, w = 1.5 } = {}) {
   const ns = "http://www.w3.org/2000/svg";
@@ -372,7 +371,6 @@ const NAV_VIEWS = [
   { k: "soul", labelKey: "nav.soul", icon: "spark" },
   { k: "packs", labelKey: "nav.packs", icon: "pack" },
   { k: "prompts", labelKey: "nav.conversations", icon: "layers" },
-  { k: "status", labelKey: "nav.status", icon: "gauge" },
 ];
 function buildNav() {
   const nav = el("div", { style: { display: "flex", gap: "2px", padding: "2px", borderRadius: "8px", background: "var(--surface-2)", marginLeft: "14px" } });
@@ -402,12 +400,10 @@ function setView(v) {
   if (D.soulBody) D.soulBody.style.display = v === "soul" ? "block" : "none";
   if (D.packsBody) D.packsBody.style.display = v === "packs" ? "flex" : "none";
   if (D.promptsBody) D.promptsBody.style.display = v === "prompts" ? "flex" : "none";
-  if (D.statusBody) D.statusBody.style.display = v === "status" ? "block" : "none";
   paintNav();
   if (v === "soul") renderSoul();
   if (v === "packs") renderPacks();
   if (v === "prompts") renderPrompts();
-  if (v === "status") renderStatusPanel();
 }
 
 // Reflect real auto-deposit status (plugin enabled + gateway running + recent hook).
@@ -1277,189 +1273,6 @@ const doPackTest = guard(async function () {
   D.packTestOut.replaceChildren(...out);
 });
 
-// ───────────────────────── Compile / Drift status panel ─────────────────────────
-function rtTargetLabel(name) {
-  if (name === "skills") return tr("runtime.target.skills");
-  return name === "soul" ? "SOUL.md" : name === "user" ? "USER.md" : "MEMORY.md";
-}
-function rtTargetIcon(name) {
-  return name === "skills" ? "pack" : name === "soul" ? "spark" : "note";
-}
-const RT_COMPILE_TONE = {
-  compiled: { bg: "var(--accent-soft)", fg: "var(--accent-ink)", icon: "check" },
-  never_compiled: { bg: "var(--surface-3)", fg: "var(--text-3)", icon: "dots" },
-  compile_failed: { bg: "var(--surface-3)", fg: "var(--del)", icon: "x" },
-};
-const RT_DRIFT_TONE = {
-  in_sync: { bg: "var(--accent-soft)", fg: "var(--accent-ink)", icon: "check" },
-  drifted: { bg: "var(--human-soft)", fg: "var(--human)", icon: "spark" },
-  unknown: { bg: "var(--surface-3)", fg: "var(--text-3)", icon: "dots" },
-};
-function rtBadge(tone, label) {
-  return el("span", { class: "loom-tag", style: { height: "20px", background: tone.bg, color: tone.fg } },
-    icon(tone.icon, { s: 11 }), label);
-}
-const rtCompileBadge = (s) => rtBadge(RT_COMPILE_TONE[s] || RT_COMPILE_TONE.never_compiled, tr("runtime.compile." + s));
-const rtDriftBadge = (s) => rtBadge(RT_DRIFT_TONE[s] || RT_DRIFT_TONE.unknown, tr("runtime.drift." + s));
-const rtFp = (fp) => fp ? fp.slice(0, 12) + "…" : tr("runtime.none");
-const rtTime = (ts) => ts ? relTime(ts) : tr("runtime.never");
-
-const doCompileAll = guard(async function () {
-  const r = await api.post("/compile", {});
-  pushToast({ tone: r.ok ? "human" : "del",
-    text: r.ok ? tr("runtime.compiledN", { n: r.compiled }) : tr("runtime.compileFailedN", { n: r.failed }) });
-  await renderStatusPanel();
-});
-
-function statusCard(t, onclick, sel) {
-  const drifted = t.drift_status === "drifted";
-  const failed = t.compile_status === "compile_failed";
-  const accent = failed ? "var(--del)" : drifted ? "var(--human)" : sel ? "var(--accent-line)" : "var(--border)";
-  const count = (labelKey, n, warn) => el("span", { style: { color: (warn && n) ? warn : "var(--text-3)" } }, tr(labelKey) + " " + n);
-  return el("button", {
-    style: {
-      textAlign: "left", border: "1px solid " + accent, borderRadius: "10px", padding: "13px 15px",
-      background: sel ? "var(--surface-3)" : "var(--surface)", cursor: "pointer", font: "inherit",
-      display: "flex", flexDirection: "column", gap: "9px",
-      boxShadow: sel ? "inset 2px 0 0 var(--accent)" : "none",
-    },
-    onclick,
-  },
-    el("div", { style: { display: "flex", alignItems: "center", gap: "8px" } },
-      el("span", { style: { color: "var(--accent)", display: "flex" } }, icon(rtTargetIcon(t.target_name), { s: 14 })),
-      el("div", { style: { fontWeight: "700", fontSize: "13.5px" } }, rtTargetLabel(t.target_name))),
-    el("div", { style: { display: "flex", gap: "6px", flexWrap: "wrap" } },
-      rtCompileBadge(t.compile_status), rtDriftBadge(t.drift_status)),
-    el("div", { class: "loom-meta", style: { fontSize: "11px" } },
-      tr("runtime.lastCompiled") + " · " + rtTime(t.last_compiled_at)),
-    el("div", { style: { display: "flex", gap: "11px", fontSize: "11px" } },
-      count("runtime.managed", t.managed_item_count, null),
-      count("runtime.unmanaged", t.unmanaged_item_count, "var(--human)"),
-      count("runtime.divergent", t.divergent_item_count, "var(--del)")));
-}
-
-function rtKV(label, value, mono) {
-  return el("div", { style: { display: "flex", gap: "10px", fontSize: "12px", padding: "3px 0" } },
-    el("span", { class: "loom-meta", style: { minWidth: "120px", fontSize: "11.5px" } }, label),
-    el("span", { class: mono ? "loom-mono" : "", style: { color: "var(--text-2)", fontSize: mono ? "11px" : "12px" } }, value));
-}
-function rtSection(title, ...kids) {
-  return el("div", { style: { marginTop: "16px" } },
-    el("div", { style: { fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: ".05em", color: "var(--text-3)", marginBottom: "7px" } }, title),
-    ...kids);
-}
-function rtList(items) {
-  if (!items || !items.length) return el("div", { class: "loom-meta", style: { fontSize: "11.5px" } }, tr("runtime.none"));
-  return el("div", { style: { display: "flex", flexDirection: "column", gap: "4px" } },
-    ...items.map((s) => el("div", { class: "loom-quote", style: { fontSize: "12px", marginBottom: "0" } }, s)));
-}
-
-function statusDetailView(d) {
-  const driftKey = d.compile_status === "compile_failed" ? "compile_failed" : d.drift_status;
-  const explain = driftKey === "compile_failed"
-    ? tr("runtime.driftExplain.compile_failed", { err: d.last_error || "" })
-    : tr("runtime.driftExplain." + d.drift_status);
-  const diff = d.diff || {};
-  const ev = d.events || { compiles: [], growth: [] };
-  const eventRow = (txt, ts, tone) => el("div", { style: { display: "flex", gap: "8px", fontSize: "11.5px", padding: "2px 0" } },
-    el("span", { class: "loom-mono", style: { color: tone || "var(--text-3)", minWidth: "92px", fontSize: "10.5px" } }, ts ? relTime(ts) : "—"),
-    el("span", { style: { color: "var(--text-2)" } }, txt));
-  return el("div", { style: { border: "1px solid var(--border)", borderRadius: "12px", padding: "18px 20px", background: "var(--surface)" } },
-    el("div", { style: { display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginBottom: "6px" } },
-      el("span", { style: { color: "var(--accent)", display: "flex" } }, icon(rtTargetIcon(d.target_name), { s: 16 })),
-      el("div", { style: { fontSize: "16px", fontWeight: "700" } }, rtTargetLabel(d.target_name)),
-      rtCompileBadge(d.compile_status), rtDriftBadge(d.drift_status)),
-
-    rtSection(tr("runtime.sectionDrift"),
-      el("div", { style: { fontSize: "12.5px", color: "var(--text-2)", lineHeight: "1.6" } }, explain)),
-
-    rtSection(tr("runtime.sectionCompile"),
-      rtKV(tr("runtime.lastCompiled"), rtTime(d.last_compiled_at)),
-      rtKV(tr("runtime.compiledFp"), rtFp(d.last_compiled_fingerprint), true)),
-
-    rtSection(tr("runtime.sectionRuntime"),
-      rtKV(tr("runtime.lastObserved"), rtTime(d.last_runtime_observed_at)),
-      rtKV(tr("runtime.currentFp"), rtFp(d.current_runtime_fingerprint), true),
-      rtKV(tr("runtime.managed"), String(d.managed_item_count)),
-      rtKV(tr("runtime.unmanaged"), String(d.unmanaged_item_count)),
-      rtKV(tr("runtime.divergent"), String(d.divergent_item_count))),
-
-    rtSection(tr("runtime.sectionDiff"),
-      el("div", { style: { fontSize: "11.5px", color: "var(--human)", marginBottom: "4px" } }, tr("runtime.unmanagedItems")),
-      rtList(diff.unmanaged),
-      el("div", { style: { fontSize: "11.5px", color: "var(--del)", margin: "9px 0 4px" } }, tr("runtime.divergentItems")),
-      rtList(diff.divergent)),
-
-    rtSection(tr("runtime.sectionEvents"),
-      el("div", { class: "loom-meta", style: { fontSize: "10.5px", marginBottom: "3px" } }, tr("runtime.compileEventsHead")),
-      (ev.compiles || []).length
-        ? el("div", {}, ...ev.compiles.slice(0, 8).map((c) => eventRow(
-            (c.status === "compiled" ? "✓ " : "✕ ") + (c.target || d.target_name) + (c.error ? " — " + c.error : ""),
-            c.timestamp, c.status === "compiled" ? "var(--accent-ink)" : "var(--del)")))
-        : el("div", { class: "loom-meta", style: { fontSize: "11px" } }, tr("runtime.none")),
-      el("div", { class: "loom-meta", style: { fontSize: "10.5px", margin: "8px 0 3px" } }, tr("runtime.growthEventsHead")),
-      (ev.growth || []).length
-        ? el("div", {}, ...ev.growth.slice(0, 8).map((g) => eventRow(g.kind + (g.source_hint ? " · " + g.source_hint : ""), g.timestamp)))
-        : el("div", { class: "loom-meta", style: { fontSize: "11px" } }, tr("runtime.none"))),
-
-    el("details", { style: { marginTop: "16px" } },
-      el("summary", { style: { cursor: "pointer", fontSize: "11px", color: "var(--text-3)" } }, tr("runtime.rawMetadata")),
-      el("pre", { class: "loom-mono", style: { marginTop: "8px", padding: "10px 12px", background: "var(--surface-2)", borderRadius: "8px", fontSize: "10.5px", lineHeight: "1.5", color: "var(--text-2)", whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "320px", overflow: "auto" } },
-        JSON.stringify(d, null, 2))));
-}
-
-async function renderStatusPanel() {
-  const host = D.statusBody;
-  const wrapStyle = { maxWidth: "1040px", margin: "0 auto", padding: "24px 26px 8px" };
-  host.replaceChildren(el("div", { style: wrapStyle }, el("div", { class: "loom-meta" }, tr("common.loading"))));
-  let data;
-  try { data = await api.get("/runtime-status"); }
-  catch (e) {
-    host.replaceChildren(el("div", { style: wrapStyle }, el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message }))));
-    return;
-  }
-  const sum = data.summary || {};
-  const overall = sum.in_control
-    ? rtBadge(RT_DRIFT_TONE.in_sync, tr("runtime.inControl"))
-    : sum.drifted
-      ? rtBadge(RT_DRIFT_TONE.drifted, tr("runtime.driftedN", { n: sum.drifted }))
-      : rtBadge(RT_DRIFT_TONE.unknown, tr("runtime.notYetControl"));
-
-  const detailArea = el("div", { style: { maxWidth: "1040px", margin: "6px auto 48px", padding: "0 26px" } });
-  const cards = el("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(228px, 1fr))", gap: "12px", marginTop: "16px" } });
-  const paintCards = () => cards.replaceChildren(
-    ...data.targets.map((t) => statusCard(t, () => loadDetail(t.target_name), S.statusTarget === t.target_name)));
-  const loadDetail = async (target) => {
-    S.statusTarget = target;
-    paintCards();
-    detailArea.replaceChildren(el("div", { class: "loom-meta", style: { padding: "10px 0" } }, tr("common.loading")));
-    try {
-      const d = await api.get("/runtime-status/" + encodeURIComponent(target));
-      detailArea.replaceChildren(statusDetailView(d));
-    } catch (e) {
-      detailArea.replaceChildren(el("div", { class: "banner err", style: { color: "var(--del)" } }, tr("common.loadFailed", { msg: e.message })));
-    }
-  };
-  paintCards();
-
-  host.replaceChildren(
-    el("div", { style: wrapStyle },
-      el("div", { style: { display: "flex", alignItems: "center", gap: "11px", flexWrap: "wrap" } },
-        el("span", { style: { color: "var(--accent)", display: "flex" } }, icon("gauge", { s: 18 })),
-        el("div", { style: { fontSize: "17px", fontWeight: "700" } }, tr("runtime.head")),
-        overall,
-        el("div", { style: { flex: "1" } }),
-        el("button", { class: "loom-btn primary", onclick: doCompileAll }, icon("check", { s: 14 }), tr("runtime.compileAll"))),
-      el("div", { class: "loom-meta", style: { fontSize: "11.5px", marginTop: "6px" } },
-        tr("runtime.subhead", {
-          managed: sum.managed_total || 0, unmanaged: sum.unmanaged_total || 0, divergent: sum.divergent_total || 0,
-        })),
-      cards),
-    detailArea);
-
-  if (S.statusTarget) loadDetail(S.statusTarget);
-}
-
 // ───────────────────────── boot ─────────────────────────
 let _statusTimer = null;
 function boot() {
@@ -1473,7 +1286,6 @@ function boot() {
   D.soulBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   D.promptsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
   D.packsBody = el("div", { style: { flex: "1", display: "none", overflow: "hidden", minHeight: "0" } });
-  D.statusBody = el("div", { style: { flex: "1", display: "none", overflow: "auto", background: "var(--bg)", minHeight: "0" } });
   // packsBody/promptsBody are rebuilt above; drop their lazily-built children so
   // renderPacks/renderPrompts re-create them inside the new bodies. Otherwise the
   // stale refs point at detached nodes and the page renders blank after a
@@ -1481,7 +1293,7 @@ function boot() {
   D.packList = D.packDetail = D.promptList = D.promptDetail = null;
   app.append(
     buildHeader(),
-    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody, D.statusBody),
+    el("div", { style: { flex: "1", display: "flex", overflow: "hidden", minHeight: "0" } }, D.inspectorBody, D.soulBody, D.packsBody, D.promptsBody),
     D.toasts);
   root.replaceChildren(app);
   loadRecords()
