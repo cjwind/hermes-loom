@@ -358,7 +358,7 @@ function buildHeader() {
   return el("div", { class: "loom-top" },
     el("div", { class: "loom-brand" },
       el("div", { class: "loom-logo" }),
-      el("div", { class: "loom-name", html: 'Hermes Loom <span class="sub">/ ' + tr("header.subtitle") + '</span>' })),
+      el("div", { class: "loom-name", html: 'Hermes Loom' })),
     buildNav(),
     pill,
     el("div", { class: "loom-top-spacer" }),
