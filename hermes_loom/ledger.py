@@ -495,6 +495,40 @@ class Ledger:
         ).fetchall()
         return [r["target"] for r in rows]
 
+    def latest_loom_memory_write(self, store_type: str) -> Optional[dict]:
+        """Latest memory snapshot Loom *itself* wrote (via a manual override), as
+        ``{fp, ts}``. Excludes observed/reconciled/bootstrap snapshots, so a direct
+        Loom edit counts as a Loom write (drift baseline) but an external change
+        captured by reconcile does not."""
+        row = self.conn.execute(
+            "SELECT s.snapshot_hash AS fp, s.captured_at AS ts "
+            "FROM memory_snapshots s JOIN growth_events e ON s.source_event_id=e.id "
+            "WHERE s.store_type=? AND e.source_hint='manual_override' "
+            "ORDER BY s.captured_at DESC, s.id DESC LIMIT 1",
+            (store_type,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def latest_loom_skill_write(self, skill_name: str) -> Optional[dict]:
+        """Latest skill snapshot Loom itself wrote via a manual override (``{fp, ts}``)."""
+        row = self.conn.execute(
+            "SELECT s.content_hash AS fp, s.captured_at AS ts "
+            "FROM skill_snapshots s JOIN growth_events e ON s.source_event_id=e.id "
+            "WHERE s.skill_name=? AND e.source_hint='manual_override' "
+            "ORDER BY s.captured_at DESC, s.id DESC LIMIT 1",
+            (skill_name,),
+        ).fetchone()
+        return dict(row) if row else None
+
+    def loom_written_skill_names(self) -> list[str]:
+        """Skills Loom has written directly via a manual override."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT s.skill_name AS n "
+            "FROM skill_snapshots s JOIN growth_events e ON s.source_event_id=e.id "
+            "WHERE e.source_hint='manual_override'"
+        ).fetchall()
+        return [r["n"] for r in rows]
+
     # -- source sessions cache ----------------------------------------------
     def upsert_session(
         self, session_id: str, source: Optional[str], title: Optional[str],

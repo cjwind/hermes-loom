@@ -89,26 +89,50 @@ def _entry_keys(content: Optional[str]) -> set:
 
 # ----- per-target status -----------------------------------------------------
 
+def _file_baseline(ledger: Ledger, target: str):
+    """(fingerprint, timestamp) of the content Loom itself last wrote to the file.
+
+    A Loom write is either a compile (``compile_events``) OR a direct edit through
+    the Inspector (``manual_override`` snapshot — overrides.py writes the file then
+    snapshots it). Taking the most recent of the two means a Loom edit advances the
+    drift baseline just like a compile, so Loom's own changes never look like drift.
+    External writes (reconcile/bootstrap snapshots) are excluded, so they still do.
+    """
+    success = ledger.latest_successful_compile(target)
+    c_fp = success["fingerprint"] if success else None
+    c_ts = success["timestamp"] if success else None
+    o_fp = o_ts = None
+    if target in _STORE_FOR_TARGET:
+        w = ledger.latest_loom_memory_write(_STORE_FOR_TARGET[target])
+        if w:
+            o_fp, o_ts = w["fp"], w["ts"]
+    if (o_ts or 0) > (c_ts or 0):
+        return o_fp, o_ts
+    return c_fp, c_ts
+
+
 def _file_target_status(ledger: Ledger, target: str) -> dict:
     latest = ledger.latest_compile_event(target)
-    success = ledger.latest_successful_compile(target)
+    baseline_fp, baseline_ts = _file_baseline(ledger, target)
 
-    if latest is None:
+    # Loom has written this file if there's a compile or a baseline (edit). It's
+    # "compile_failed" only when the most recent compile attempt failed and nothing
+    # newer (a later edit/compile) has since written the file.
+    if baseline_fp is None and latest is None:
         compile_status = "never_compiled"
-    elif latest["status"] == "compiled":
-        compile_status = "compiled"
-    else:
+    elif (latest and latest["status"] == "compile_failed"
+          and latest["timestamp"] >= (baseline_ts or 0)):
         compile_status = "compile_failed"
+    else:
+        compile_status = "compiled"
 
-    baseline_fp = success["fingerprint"] if success else None
-    last_compiled_at = success["timestamp"] if success else (
-        latest["timestamp"] if latest else None)
+    last_compiled_at = baseline_ts
     content, current_fp = _runtime_content(target)
 
     if baseline_fp is None:
         drift = "unknown"
     elif current_fp is None:
-        drift = "drifted"               # compiled before, file now missing
+        drift = "drifted"               # written before, file now missing
     elif current_fp == baseline_fp:
         drift = "in_sync"
     else:
@@ -125,15 +149,15 @@ def _file_target_status(ledger: Ledger, target: str) -> dict:
     else:
         store = _STORE_FOR_TARGET[target]
         runtime_keys = _entry_keys(content)
-        compiled_content = None
-        if success:
-            snap = compiler._latest_memory(ledger, store, success["timestamp"])  # noqa: SLF001
+        baseline_content = None
+        if baseline_ts:
+            snap = compiler._latest_memory(ledger, store, baseline_ts)  # noqa: SLF001
             if snap and snap.get("content") is not None:
-                compiled_content = snap["content"]
-        compiled_keys = _entry_keys(compiled_content) if compiled_content is not None else set()
-        managed = len(compiled_keys & runtime_keys)
-        unmanaged = len(runtime_keys - compiled_keys)
-        divergent = len(compiled_keys - runtime_keys)
+                baseline_content = snap["content"]
+        baseline_keys = _entry_keys(baseline_content) if baseline_content is not None else set()
+        managed = len(baseline_keys & runtime_keys)
+        unmanaged = len(runtime_keys - baseline_keys)
+        divergent = len(baseline_keys - runtime_keys)
 
     return {
         "target_name": target,
@@ -151,37 +175,56 @@ def _file_target_status(ledger: Ledger, target: str) -> dict:
     }
 
 
+def _skill_baseline(ledger: Ledger, name: str):
+    """(fp, ts) of the content Loom last wrote for a skill — compile or edit."""
+    succ = ledger.latest_successful_compile("skill:" + name)
+    c_fp = succ["fingerprint"] if succ else None
+    c_ts = succ["timestamp"] if succ else None
+    w = ledger.latest_loom_skill_write(name)
+    o_fp, o_ts = (w["fp"], w["ts"]) if w else (None, None)
+    if (o_ts or 0) > (c_ts or 0):
+        return o_fp, o_ts
+    return c_fp, c_ts
+
+
 def _skills_status(ledger: Ledger) -> dict:
-    skill_targets = ledger.compiled_skill_targets()      # ['skill:foo', ...]
+    # A skill is "managed" if Loom has ever written it — compiled it out OR edited
+    # it directly through the Inspector.
+    managed_names = sorted(
+        {t.split("skill:", 1)[1] for t in ledger.compiled_skill_targets()}
+        | set(ledger.loom_written_skill_names())
+    )
     runtime = {s["name"]: s for s in hermes_state.list_skills()}
 
     managed = divergent = 0
     compiled_pairs, current_pairs = [], []
     last_compiled_at = None
-    most_recent = None                                    # latest event across skills
+    most_recent = None                                    # latest compile event across skills
 
-    for t in skill_targets:
+    for t in ledger.compiled_skill_targets():
         latest = ledger.latest_compile_event(t)
         if latest and (most_recent is None or latest["timestamp"] > most_recent["timestamp"]):
             most_recent = latest
-        succ = ledger.latest_successful_compile(t)
-        if not succ:
+
+    for name in managed_names:
+        base_fp, base_ts = _skill_baseline(ledger, name)
+        if base_fp is None:
             continue
-        name = t.split("skill:", 1)[1]
         managed += 1
-        if succ["timestamp"] and (last_compiled_at is None or succ["timestamp"] > last_compiled_at):
-            last_compiled_at = succ["timestamp"]
+        if base_ts and (last_compiled_at is None or base_ts > last_compiled_at):
+            last_compiled_at = base_ts
         cur = runtime.get(name)
         cur_fp = cur["hash"] if cur else None
-        compiled_pairs.append((name, succ["fingerprint"]))
+        compiled_pairs.append((name, base_fp))
         current_pairs.append((name, cur_fp))
-        if cur_fp != succ["fingerprint"]:
+        if cur_fp != base_fp:
             divergent += 1
 
-    unmanaged = len([n for n in runtime if ("skill:" + n) not in skill_targets])
+    unmanaged = len([n for n in runtime if n not in managed_names])
 
     if most_recent is None:
-        compile_status = "never_compiled"
+        # no compile events; still "compiled" (Loom-written) if any skill was edited
+        compile_status = "compiled" if managed > 0 else "never_compiled"
     elif most_recent["status"] == "compiled":
         compile_status = "compiled"
     else:
@@ -256,15 +299,16 @@ def _diff_summary(ledger: Ledger, target: str, status: dict) -> dict:
         return out
     if target == "skills":
         runtime = {s["name"]: s for s in hermes_state.list_skills()}
-        for t in ledger.compiled_skill_targets():
-            name = t.split("skill:", 1)[1]
-            succ = ledger.latest_successful_compile(t)
-            if not succ:
+        managed_names = ({t.split("skill:", 1)[1] for t in ledger.compiled_skill_targets()}
+                         | set(ledger.loom_written_skill_names()))
+        for name in sorted(managed_names):
+            base_fp, _ = _skill_baseline(ledger, name)
+            if base_fp is None:
                 continue
             cur = runtime.get(name)
-            if cur is None or cur["hash"] != succ["fingerprint"]:
+            if cur is None or cur["hash"] != base_fp:
                 out["divergent"].append(name)
-        out["unmanaged"] = [n for n in runtime if ("skill:" + n) not in ledger.compiled_skill_targets()]
+        out["unmanaged"] = [n for n in runtime if n not in managed_names]
         return out
     # memory / user: entry-level
     store = _STORE_FOR_TARGET[target]
