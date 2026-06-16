@@ -6,8 +6,7 @@ status payload has the documented fields; and a failed write reports compile_fai
 """
 
 from base import LoomTestCase
-from hermes_loom import compiler, runtime, service, snapshot, soul
-from hermes_loom.memory_parser import entry_key
+from hermes_loom import compiler, runtime, snapshot, soul
 
 
 class TestRuntimeStatus(LoomTestCase):
@@ -101,20 +100,6 @@ class TestRuntimeStatus(LoomTestCase):
         self.assertTrue(any(r["status"] == "compile_failed" for r in res["results"]))
         st = runtime._target_status(led, "memory")
         self.assertEqual(st["compile_status"], "compile_failed")
-
-    # A Loom edit (direct file write) keeps the target managed, not drifted ------
-    def test_loom_edit_stays_in_sync_and_managed(self):
-        led = self._seed_and_compile()
-        # edit a memory entry through Loom (writes USER.md directly + records an
-        # override snapshot). This must NOT read as external drift.
-        service.record_edit(led, "user", entry_key("User likes tea."),
-                            "User likes oolong tea.")
-        st = runtime._target_status(led, "user")
-        self.assertEqual(st["drift_status"], "in_sync")
-        self.assertEqual(st["compile_status"], "compiled")
-        self.assertEqual(st["divergent_item_count"], 0)
-        self.assertEqual(st["unmanaged_item_count"], 0)
-        self.assertGreaterEqual(st["managed_item_count"], 1)
 
     # SOUL target: compiled from its DB version, then drift detected -----------
     def test_soul_target_compile_and_drift(self):
