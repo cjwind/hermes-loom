@@ -25,7 +25,7 @@
       "lang.switchTitle": "切換語言 / Switch language",
       // header / nav
       "header.subtitle": "檢視台",
-      "nav.inspector": "檢視台",
+      "nav.deposits": "沈澱",
       "nav.soul": "SOUL",
       "nav.packs": "記憶層",
       "nav.conversations": "對話記錄",
@@ -280,7 +280,7 @@
       "lang.name": "English",
       "lang.switchTitle": "切換語言 / Switch language",
       "header.subtitle": "Inspector",
-      "nav.inspector": "Inspector",
+      "nav.deposits": "Deposits",
       "nav.soul": "SOUL",
       "nav.packs": "Memory packs",
       "nav.conversations": "Conversation log",

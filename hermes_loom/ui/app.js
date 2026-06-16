@@ -367,7 +367,7 @@ function buildHeader() {
 
 // Top-level view switcher: the Inspector (observed growth) vs the SOUL editor.
 const NAV_VIEWS = [
-  { k: "inspector", labelKey: "nav.inspector", icon: "flow" },
+  { k: "inspector", labelKey: "nav.deposits", icon: "flow" },
   { k: "soul", labelKey: "nav.soul", icon: "spark" },
   { k: "packs", labelKey: "nav.packs", icon: "pack" },
   { k: "prompts", labelKey: "nav.conversations", icon: "layers" },
