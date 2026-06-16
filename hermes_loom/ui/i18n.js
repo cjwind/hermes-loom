@@ -24,7 +24,7 @@
       "lang.name": "中文",
       "lang.switchTitle": "切換語言 / Switch language",
       // header / nav
-      "header.subtitle": "檢視台",
+      "header.subtitle": "沈澱",
       "nav.deposits": "沈澱",
       "nav.soul": "SOUL",
       "nav.packs": "記憶層",
@@ -279,7 +279,7 @@
       "unit.lines": "{n} lines",
       "lang.name": "English",
       "lang.switchTitle": "切換語言 / Switch language",
-      "header.subtitle": "Inspector",
+      "header.subtitle": "Deposits",
       "nav.deposits": "Deposits",
       "nav.soul": "SOUL",
       "nav.packs": "Memory packs",
