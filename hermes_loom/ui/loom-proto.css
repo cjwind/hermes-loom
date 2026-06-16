@@ -84,3 +84,17 @@
 .loom-input { height: 30px; border: 1px solid var(--border-2); border-radius: 8px; background: var(--surface);
   color: var(--text); font-family: inherit; font-size: 12.5px; padding: 0 10px; outline: none; width: 100%; }
 .loom-input:focus { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+
+/* chip-style tag editor */
+.loom-tagedit { display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  min-height: 38px; padding: 6px 8px; border: 1px solid var(--border-2);
+  border-radius: 8px; background: var(--surface); cursor: text; }
+.loom-tagedit:focus-within { border-color: var(--accent-line); box-shadow: 0 0 0 3px var(--accent-soft); }
+.loom-tagedit input { flex: 1; min-width: 90px; border: none; outline: none;
+  background: transparent; color: var(--text); font-family: inherit; font-size: 12.5px; padding: 2px 0; }
+.loom-tagchip { display: inline-flex; align-items: center; gap: 4px; height: 22px;
+  padding: 0 3px 0 7px; border-radius: 6px; background: var(--surface-3); color: var(--text-2);
+  font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+.loom-tagchip button { border: none; background: transparent; cursor: pointer; color: var(--text-4);
+  display: flex; padding: 1px; border-radius: 4px; }
+.loom-tagchip button:hover { color: var(--del); background: var(--surface-2); }

@@ -1118,6 +1118,34 @@ const parseTagsInput = (s) => (s || "").split(/[,，]/).map((x) => x.trim()).fil
 function packTagChips(tags, opts) {
   return (tags || []).map((t) => el("span", { class: "loom-tag", style: Object.assign({ height: "17px", padding: "0 6px", fontSize: "10px", background: "var(--surface-3)", color: "var(--text-2)" }, opts || {}) }, icon("tag", { s: 9 }), t));
 }
+// Chip-style tag editor: existing tags render as removable chips; type and press
+// Enter or comma to add, Backspace on an empty field removes the last. Returns the
+// node plus a getter for the current tags. Dedups, splits pasted comma lists.
+function tagEditor(initial) {
+  const tags = [...(initial || [])];
+  const input = el("input");
+  const wrap = el("div", { class: "loom-tagedit", onclick: () => input.focus() });
+  const render = () => {
+    const chips = tags.map((t, i) => el("span", { class: "loom-tagchip" },
+      icon("tag", { s: 9 }), t,
+      el("button", { type: "button", "aria-label": tr("pack.tagRemove", { t }),
+        onclick: (e) => { e.stopPropagation(); tags.splice(i, 1); render(); input.focus(); } },
+        icon("x", { s: 9 }))));
+    wrap.replaceChildren(...chips, input);
+    input.placeholder = tags.length ? tr("pack.tagAddMore") : tr("pack.tagsPlaceholder");
+  };
+  const add = () => {
+    parseTagsInput(input.value).forEach((t) => { if (!tags.includes(t)) tags.push(t); });
+    input.value = ""; render();
+  };
+  input.onkeydown = (e) => {
+    if (e.key === "Enter" || e.key === "," || e.key === "，") { e.preventDefault(); if (input.value.trim()) add(); }
+    else if (e.key === "Backspace" && !input.value && tags.length) { tags.pop(); render(); input.focus(); }
+  };
+  input.onblur = () => { if (input.value.trim()) add(); };
+  render();
+  return { node: wrap, get: () => tags.slice() };
+}
 async function renderPacks() {
   if (!D.packList) {
     D.packList = el("div", { style: { width: "276px", flex: "0 0 auto", borderRight: "1px solid var(--border)", overflow: "auto", background: "var(--surface)" } });
@@ -1169,14 +1197,14 @@ function renderPackDetail() {
   if (!p) { host.replaceChildren(el("div", { class: "loom-empty", style: { padding: "44px" } }, icon("pack", { s: 26, color: "var(--text-3)" }), el("div", { style: { fontSize: "13px" } }, tr("pack.detailEmpty")))); return; }
 
   const title = el("input", { class: "loom-input", placeholder: tr("pack.titlePlaceholder"), value: p.title });
-  const tags = el("input", { class: "loom-input", placeholder: tr("pack.tagsPlaceholder"), value: (p.tags || []).join(", ") });
+  const tagsEd = tagEditor(p.tags);
   const whenTo = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "62px", resize: "vertical", padding: "10px 14px", lineHeight: "1.6", fontSize: "12.5px", boxSizing: "border-box" }, placeholder: tr("pack.whenPlaceholder") });
   whenTo.value = p.when_to_use || "";
   const content = el("textarea", { class: "loom-input", style: { width: "100%", height: "auto", minHeight: "34vh", resize: "vertical", padding: "12px 14px", lineHeight: "1.6", fontSize: "13px", boxSizing: "border-box" }, placeholder: tr("pack.contentPlaceholder") });
   content.value = p.content;
   const enabled = el("input", { type: "checkbox", style: { width: "15px", height: "15px", accentColor: "var(--accent)" } });
   enabled.checked = !!p.enabled;
-  D.packTitle = title; D.packTags = tags; D.packWhen = whenTo; D.packContent = content; D.packEnabled = enabled;
+  D.packTitle = title; D.packTagsGet = tagsEd.get; D.packWhen = whenTo; D.packContent = content; D.packEnabled = enabled;
 
   const field = (label, node, hint) => el("div", { style: { marginBottom: "13px" } },
     el("div", { style: { fontSize: "11px", fontWeight: "600", color: "var(--text-2)", marginBottom: "5px" } }, label),
@@ -1189,7 +1217,7 @@ function renderPackDetail() {
       el("div", { style: { fontSize: "16px", fontWeight: "700" } }, isNew ? tr("pack.addHead") : tr("pack.editHead")),
       !isNew && el("span", { class: "loom-mono", style: { fontSize: "10.5px", color: "var(--text-4)" } }, "#" + p.id)),
     field(tr("pack.fieldTitle"), title, tr("pack.fieldTitleHint")),
-    field(tr("pack.fieldTags"), tags, tr("pack.fieldTagsHint")),
+    field(tr("pack.fieldTags"), tagsEd.node, tr("pack.fieldTagsHint")),
     field(tr("pack.fieldWhen"), whenTo, tr("pack.fieldWhenHint")),
     field(tr("pack.fieldContent"), content),
     el("label", { style: { display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", cursor: "pointer", fontSize: "12.5px", color: "var(--text-2)" } },
@@ -1215,7 +1243,7 @@ function packTestPanel() {
     D.packTestOut);
 }
 const doPackSave = guard(async function () {
-  const body = { title: D.packTitle.value, tags: parseTagsInput(D.packTags.value), when_to_use: D.packWhen.value, content: D.packContent.value, enabled: D.packEnabled.checked };
+  const body = { title: D.packTitle.value, tags: D.packTagsGet(), when_to_use: D.packWhen.value, content: D.packContent.value, enabled: D.packEnabled.checked };
   if (S.packSel !== "new") body.id = S.packSel;
   const res = await api.post("/packs/save", body);
   S.packSel = res.id;
