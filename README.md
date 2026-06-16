@@ -44,6 +44,19 @@ docker compose up -d                    # UI at http://127.0.0.1:8765
 
 That's it — open <http://127.0.0.1:8765>. Stop with `docker compose down`.
 
+### Uninstall
+
+```bash
+docker compose down                 # stop the Loom UI
+
+# disable + remove the plugin from ~/.hermes/plugins, then restart Hermes
+scripts/uninstall-plugin.sh
+```
+
+Your Loom ledger in `~/.hermes-loom` is left untouched — delete that directory too if
+you want a clean slate. Both scripts take an optional `<ssh-host>` to act on a remote
+Hermes install.
+
 ### Common commands
 
 Run any subcommand with `docker compose run --rm loom <cmd>`:
